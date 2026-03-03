@@ -1,11 +1,14 @@
-from django.shortcuts import render
-
-# Create your views here.
+# prestamos/views.py
 from rest_framework import generics
-from .models import Cliente
-from .serializers import ClienteSerializer
+from .models import Cliente, Prestamo
+from .serializers import ClienteSerializer, PrestamoSerializer
 
+# Vista para Clientes (La que ya tenías)
 class ClienteListCreateView(generics.ListCreateAPIView):
     queryset = Cliente.objects.all()
     serializer_class = ClienteSerializer
-    # Solo usuarios logueados pueden ver/crear clientes
+
+# NUEVA Vista para Préstamos
+class PrestamoListCreateView(generics.ListCreateAPIView):
+    queryset = Prestamo.objects.all().order_by('-id')
+    serializer_class = PrestamoSerializer
