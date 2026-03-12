@@ -1,65 +1,123 @@
-# prestamos/views.py
-from urllib import request
+from datetime import datetime, date, timedelta
+from decimal import Decimal
 
 from django.utils import timezone
+from django.db.models import Sum, Count, DecimalField
+from django.db.models.functions import Coalesce, TruncDay, TruncWeek, TruncMonth
+
 from rest_framework import generics
-from django.db.models import Sum, Count, Q
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from .models import Abono, Cliente, Penalizacion, Prestamo
-from datetime import datetime, timedelta
-from rest_framework.views import APIView
 from rest_framework.decorators import api_view
-from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
-from .serializers import AbonoSerializer, ClienteSerializer, PrestamoSerializer
 
-# Vista para Clientes (La que ya tenías)
+from .models import Prestamo, Cliente, Abono, Penalizacion
+from .serializers import ClienteSerializer, PrestamoSerializer, AbonoSerializer
+
+
+# ==============================
+# ESTADÍSTICAS GLOBALES
+# ==============================
+
+@api_view(['GET'])
+def estadisticas_globales(request):
+
+    definicion_rangos = [
+        {"label": "$500-1500", "min": 500, "max": 1500},
+        {"label": "$1501-3000", "min": 1501, "max": 3000},
+        {"label": "$3001-5000", "min": 3001, "max": 5000},
+        {"label": "$5001-7500", "min": 5001, "max": 7500},
+        {"label": "$7501-10000", "min": 7501, "max": 10000},
+    ]
+
+    prestamos = Prestamo.objects.annotate(
+        total_abonado=Coalesce(Sum('abonos__monto'), Decimal('0.00'), output_field=DecimalField())
+    )
+
+    rangos_data = []
+
+    total_recuperado = Decimal("0.00")
+    capital_en_calle = Decimal("0.00")
+    prestamos_activos = 0
+
+    for r in definicion_rangos:
+        rangos_data.append({
+            "label": r["label"],
+            "min": r["min"],
+            "max": r["max"],
+            "total": Decimal("0.00"),
+            "cant": 0
+        })
+
+    for p in prestamos:
+
+        saldo = round(p.monto_total_pagar - p.total_abonado, 2)
+        total_recuperado += p.total_abonado
+
+        if saldo > Decimal("0.01"):
+
+            prestamos_activos += 1
+            capital_en_calle += saldo
+            capital = p.monto_capital
+
+            for r in rangos_data:
+                if r["min"] <= capital <= r["max"]:
+                    r["cant"] += 1
+                    r["total"] += saldo
+                    break
+
+    for r in rangos_data:
+        r["total"] = f"${r['total']:,.2f}"
+        del r["min"]
+        del r["max"]
+
+    return Response({
+        "prestamos_activos": prestamos_activos,
+        "capital_en_calle": f"${capital_en_calle:,.2f}",
+        "total_recuperado": f"${total_recuperado:,.2f}",
+        "rangos": rangos_data
+    })
+
+
+# ==============================
+# CLIENTES
+# ==============================
+
 class ClienteListCreateView(generics.ListCreateAPIView):
     queryset = Cliente.objects.all()
     serializer_class = ClienteSerializer
 
-# NUEVA Vista para Préstamos
-class PrestamoListCreateView(generics.ListCreateAPIView):
-    queryset = Prestamo.objects.all().order_by('-id')
-    serializer_class = PrestamoSerializer
-    
+
 class ClienteDetailView(generics.RetrieveAPIView):
     queryset = Cliente.objects.all()
     serializer_class = ClienteSerializer
 
-# prestamos/views.py
+
+# ==============================
+# PRÉSTAMOS
+# ==============================
+
+class PrestamoListCreateView(generics.ListCreateAPIView):
+    queryset = Prestamo.objects.all().order_by('-id')
+    serializer_class = PrestamoSerializer
+
+
+# ==============================
+# ABONOS
+# ==============================
+
 class RegistrarAbonoView(generics.CreateAPIView):
     queryset = Abono.objects.all()
     serializer_class = AbonoSerializer
 
-class EstadisticasGlobalesView(APIView):
-    def get(self, request):
-        total_recuperado = Abono.objects.aggregate(total=Sum('monto'))['total'] or 0
-        
-        def obtener_datos_rango(min_v, max_v):
-            qs = Prestamo.objects.filter(monto_capital__gte=min_v, monto_capital__lte=max_v)
-            return {
-                "label": f"${min_v}-{max_v}",
-                "total": f"${qs.aggregate(Sum('monto_capital'))['monto_capital__sum'] or 0:,.2f}",
-                "cant": qs.count()
-            }
 
-        rangos = [
-            obtener_datos_rango(500, 1500),
-            obtener_datos_rango(1501, 3000),
-            obtener_datos_rango(3001, 5000),
-            obtener_datos_rango(5001, 7500),
-            obtener_datos_rango(7501, 10000),
-        ]
+# ==============================
+# ESTADÍSTICAS DINÁMICAS (GRÁFICAS)
+# ==============================
 
-        return Response({
-            "total_recuperado": f"${total_recuperado:,.2f}",
-            "rangos": rangos
-        })
-
-# VISTA 2: PARA LA GRÁFICA FILTRABLE
 class EstadisticasDinamicasView(APIView):
+
     def get(self, request):
+
         periodo = request.query_params.get('periodo', 'semana')
         hoy = datetime.now()
 
@@ -67,10 +125,12 @@ class EstadisticasDinamicasView(APIView):
             inicio = hoy - timedelta(days=7)
             truncado = TruncDay('fecha_creacion')
             formato = "%a"
+
         elif periodo == 'mes':
             inicio = hoy - timedelta(days=30)
             truncado = TruncWeek('fecha_creacion')
             formato = "Sem %W"
+
         else:
             inicio = hoy - timedelta(days=365)
             truncado = TruncMonth('fecha_creacion')
@@ -80,7 +140,10 @@ class EstadisticasDinamicasView(APIView):
             Prestamo.objects.filter(fecha_creacion__gte=inicio)
             .annotate(fecha=truncado)
             .values('fecha')
-            .annotate(activos=Count('id'), interes=Sum('tasa_interes'))
+            .annotate(
+                activos=Count('id'),
+                interes=Sum('tasa_interes')
+            )
             .order_by('fecha')
         )
 
@@ -89,79 +152,18 @@ class EstadisticasDinamicasView(APIView):
                 "name": d['fecha'].strftime(formato),
                 "activos": d['activos'],
                 "interes": float(d['interes'] or 0) / d['activos'] if d['activos'] > 0 else 0
-            } for d in datos
+            }
+            for d in datos
         ]
+
         return Response(resultado)
-    
 
-class CalendarioPagosView(APIView):
-    def get(self, request):
-        hoy = timezone.now().date()
-        prestamos = Prestamo.objects.filter(activo=True)
-        proyecciones = []
 
-        for p in prestamos:
-            # Obtenemos los números de semana que ya han sido pagados para este préstamo
-            semanas_pagadas = list(p.abonos.values_list('semana_numero', flat=True))
-
-            for i in range(1, p.cuotas + 1):
-                fecha_pago = p.fecha_inicio + timedelta(weeks=i)
-                monto_cuota = p.monto_total_pagar / p.cuotas
-                
-                # --- DETERMINAR ESTATUS ---
-                if i in semanas_pagadas:
-                    estatus = 'pagado'
-                elif fecha_pago < hoy:
-                    estatus = 'vencido'
-                else:
-                    estatus = 'pendiente'
-
-                proyecciones.append({
-                    "id": f"{p.id}-{i}",
-                    "cliente": p.cliente.nombre,
-                    "fecha": fecha_pago.strftime('%a %b %d %Y'),
-                    "monto": round(monto_cuota, 2),
-                    "idCliente": p.cliente.id,
-                    "tel": p.cliente.telefono,
-                    "estatus": estatus, # <--- Enviamos el color lógico
-                    "num_semana": i
-                })
-        
-        return Response(proyecciones)
-@api_view(['POST'])
-def condonar_mora(request, pk):
-    try:
-        penalizacion = Penalizacion.objects.get(pk=pk)
-        motivo = request.data.get('motivo')
-
-        if not motivo or len(motivo) < 10:
-            return Response({"error": "Debes proporcionar un motivo válido (mín. 10 caracteres)"}, status=400)
-
-        # Marcamos como inactiva
-        penalizacion.activa = False
-        penalizacion.motivo_condonacion = motivo
-        penalizacion.fecha_condonacion = timezone.now()
-        penalizacion.save()
-
-        # Importante: Restamos el monto del total a pagar del préstamo
-        prestamo = penalizacion.prestamo
-        prestamo.monto_total_pagar -= penalizacion.monto_penalizado
-        prestamo.save()
-
-        return Response({"message": "Penalización condonada correctamente"})
-    except Penalizacion.DoesNotExist:
-        return Response({"error": "No existe el registro"}, status=404)
-
-from datetime import datetime, date, timedelta
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-
-from .models import Prestamo
-
+# ==============================
+# CALENDARIO DE PAGOS
+# ==============================
 
 def to_date(value):
-    """Convierte datetime o date a date."""
     if isinstance(value, datetime):
         return value.date()
     return value
@@ -178,7 +180,9 @@ class CalendarioPagosView(APIView):
 
         proyecciones = []
 
-        prestamos = Prestamo.objects.filter(activo=True).select_related("cliente").prefetch_related("abonos")
+        prestamos = Prestamo.objects.filter(activo=True).select_related(
+            "cliente"
+        ).prefetch_related("abonos")
 
         for p in prestamos:
 
@@ -186,7 +190,6 @@ class CalendarioPagosView(APIView):
 
             for i in range(1, p.cuotas + 1):
 
-                # calcular fecha
                 if p.modalidad == "S":
                     fecha_pago = fecha_base + timedelta(weeks=i)
 
@@ -196,10 +199,8 @@ class CalendarioPagosView(APIView):
                 else:
                     fecha_pago = fecha_base + timedelta(days=30 * i)
 
-                # asegurar tipo date
                 fecha_pago = to_date(fecha_pago)
 
-                # mover si cae domingo
                 if fecha_pago.weekday() == 6:
                     fecha_pago += timedelta(days=1)
 
@@ -227,3 +228,35 @@ class CalendarioPagosView(APIView):
                     })
 
         return Response(proyecciones)
+
+
+# ==============================
+# CONDONAR MORA
+# ==============================
+
+@api_view(['POST'])
+def condonar_mora(request, pk):
+
+    try:
+        penalizacion = Penalizacion.objects.get(pk=pk)
+        motivo = request.data.get('motivo')
+
+        if not motivo or len(motivo) < 10:
+            return Response(
+                {"error": "Debes proporcionar un motivo válido (mín. 10 caracteres)"},
+                status=400
+            )
+
+        penalizacion.activa = False
+        penalizacion.motivo_condonacion = motivo
+        penalizacion.fecha_condonacion = timezone.now()
+        penalizacion.save()
+
+        prestamo = penalizacion.prestamo
+        prestamo.monto_total_pagar -= penalizacion.monto_penalizado
+        prestamo.save()
+
+        return Response({"message": "Penalización condonada correctamente"})
+
+    except Penalizacion.DoesNotExist:
+        return Response({"error": "No existe el registro"}, status=404)
