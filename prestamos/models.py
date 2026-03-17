@@ -1,5 +1,26 @@
 from django.db import models
 
+from usuarios.models import LogSistema
+
+
+def registrar_log(user, accion, detalle):
+    # Validamos que el usuario no sea anónimo
+    if user and user.is_authenticated:
+        # Solo pasamos los datos, sin definiciones de modelos
+        LogSistema.objects.create(
+            usuario=user, 
+            accion=accion, 
+            detalle=detalle
+        )
+        
+class Grupo(models.Model):
+    nombre_grupo = models.CharField(max_length=200, verbose_name="Nombre del Grupo")
+    integrantes = models.ManyToManyField('Cliente', related_name='mis_grupos')
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.nombre_grupo
+            
 class Cliente(models.Model):
     nombre = models.CharField(max_length=200)
     telefono = models.CharField(max_length=15)
@@ -19,19 +40,25 @@ class Aval(models.Model):
     direccion = models.TextField()
 
 class Prestamo(models.Model):
+    
+    TIPOS = [('I', 'Individual'), ('G', 'Grupal')]
     MODALIDADES = [
         ('S', 'Semanal'),
         ('Q', 'Quincenal'),
         ('M', 'Mensual'),
     ]
+    tipo = models.CharField(max_length=1, choices=TIPOS, default='I')
+    # Si es individual, se llena 'cliente'. Si es grupal, se llena 'grupo'.
+    cliente = models.ForeignKey('Cliente', on_delete=models.CASCADE, null=True, blank=True, related_name='prestamos')
+    grupo = models.ForeignKey(Grupo, on_delete=models.SET_NULL, null=True, blank=True, related_name='prestamos')
     # Relación con el Deudor
-    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='prestamos')
     # Datos del Préstamo
     monto_capital = models.DecimalField(max_digits=10, decimal_places=2)
     tasa_interes = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
     modalidad = models.CharField(max_length=1, choices=MODALIDADES)
     cuotas = models.IntegerField()
     fecha_inicio = models.DateTimeField(auto_now_add=True)
+    folio_pagare = models.IntegerField(null=True, blank=True, editable=False)
     # Información del Aval
     nombre_aval = models.CharField(max_length=200)
     telefono_aval = models.CharField(max_length=15)
@@ -42,8 +69,30 @@ class Prestamo(models.Model):
     activo = models.BooleanField(default=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     monto_total_pagar = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+
+    def save(self, *args, **kwargs):
+        if not self.folio_pagare:
+            # Buscamos el valor máximo actual de folio_pagare
+            from django.db.models import Max
+            max_folio = Prestamo.objects.aggregate(Max('folio_pagare'))['folio_pagare__max']
+            
+            if max_folio is not None:
+                self.folio_pagare = max_folio + 1
+            else:
+                self.folio_pagare = 1 # Si la tabla está vacía o todos son null
+                
+        super(Prestamo, self).save(*args, **kwargs)
+
     def __str__(self):
-        return f"Préstamo {self.id} - Cliente: {self.cliente.nombre} | Aval: {self.nombre_aval}"
+        # Verificamos si es grupal o individual para evitar el error de 'NoneType'
+        if self.tipo == 'G' and self.grupo:
+            sujeto = f"GRUPO: {self.grupo.nombre_grupo}"
+        elif self.cliente:
+            sujeto = f"CLIENTE: {self.cliente.nombre}"
+        else:
+            sujeto = "Sin asignar"
+            
+        return f"Folio: {self.folio_pagare} - {sujeto}"
 
 
 class Abono(models.Model):
@@ -51,9 +100,32 @@ class Abono(models.Model):
     monto = models.DecimalField(max_digits=10, decimal_places=2)
     fecha_pago = models.DateField(auto_now_add=True)
     semana_numero = models.IntegerField() # Para saber si es la Sem 1, Sem 2, etc.
+    fecha_pago = models.DateField(auto_now_add=True)
+    hora_pago = models.TimeField(auto_now_add=True)
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs) # Primero guardamos el abono
+        
+        # Calculamos el total abonado hasta ahora
+        prestamo = self.prestamo
+        total_abonado = prestamo.abonos.aggregate(models.Sum('monto'))['monto__sum'] or 0
+        
+        # Si ya cubrió el total, desactivamos el préstamo
+        if total_abonado >= prestamo.monto_total_pagar:
+            prestamo.activo = False
+            prestamo.save()
+            # Opcional: Registrar en el log que se liquidó
+            registrar_log(None, "LIQUIDACION", f"Préstamo #{prestamo.id} pagado totalmente")
 
     def __str__(self):
-        return f"Abono {self.id} - {self.prestamo.cliente.nombre}"
+    # Primero verificamos quién es el deudor de forma segura
+        if self.prestamo.tipo == 'G' and self.prestamo.grupo:
+            deudor = self.prestamo.grupo.nombre_grupo
+        elif self.prestamo.cliente:
+            deudor = self.prestamo.cliente.nombre
+        else:
+            deudor = "Deudor desconocido"
+        
+        return f"Abono {self.id} - {deudor} (${self.monto})"
 
 class Penalizacion(models.Model):
     prestamo = models.ForeignKey('Prestamo', on_delete=models.CASCADE, related_name='penalizaciones')
@@ -68,3 +140,4 @@ class Penalizacion(models.Model):
     def __str__(self):
         estado = "ACTIVA" if self.activa else "CONDONADA"
         return f"{self.prestamo.cliente.nombre} - {self.fecha_aplicacion} ({estado})"
+
