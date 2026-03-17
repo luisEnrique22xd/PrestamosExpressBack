@@ -403,42 +403,52 @@ class CalendarioPagosView(APIView):
 # ==============================
 # CONDONAR MORA
 # ==============================
-
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def condonar_mora(request, pk):
-
     try:
+        # 1. Obtener la penalización y definir el préstamo DESDE EL INICIO
         penalizacion = Penalizacion.objects.get(pk=pk)
+        prestamo = penalizacion.prestamo  # <-- Definimos 'prestamo' aquí
+        
+        # 2. Validar el motivo ANTES de hacer cualquier cálculo
         motivo = request.data.get('motivo')
-
         if not motivo or len(motivo) < 10:
             return Response(
                 {"error": "Debes proporcionar un motivo válido (mín. 10 caracteres)"},
                 status=400
             )
 
-        monto_perdido = penalizacion.monto_penalizado
-        nombre_cliente = penalizacion.prestamo.cliente.nombre
-        penalizacion.activa = False
-        penalizacion.motivo_condonacion = motivo
-        penalizacion.fecha_condonacion = timezone.now()
-        penalizacion.save()
+        # 3. Solo restamos si la penalización está activa (para evitar restar doble si le dan clic dos veces)
+        if penalizacion.activa:
+            monto_a_restar = penalizacion.monto_penalizado
+            
+            # Restamos del préstamo
+            prestamo.monto_total_pagar -= monto_a_restar
+            prestamo.save()
 
-        prestamo = penalizacion.prestamo
-        prestamo.monto_total_pagar -= penalizacion.monto_penalizado
-        prestamo.save()
+            # Actualizamos la penalización
+            penalizacion.activa = False
+            penalizacion.motivo_condonacion = motivo
+            penalizacion.fecha_condonacion = timezone.now()
+            penalizacion.save()
 
-        registrar_log(
-            request.user, 
-            "CONDONACION_MORA", 
-            f"Se perdonaron ${monto_perdido} a {nombre_cliente}. Motivo: {motivo}"
-        )
+            # Registramos el log
+            registrar_log(
+                request.user, 
+                "CONDONACION_MORA", 
+                f"Se perdonaron ${monto_a_restar} a {prestamo.cliente.nombre}. Motivo: {motivo}"
+            )
 
-        return Response({"message": "Penalización condonada correctamente"})
+            return Response({"message": "Penalización condonada y saldo actualizado"})
+        
+        else:
+            return Response({"message": "Esta penalización ya había sido condonada anteriormente"}, status=400)
 
     except Penalizacion.DoesNotExist:
         return Response({"error": "No existe el registro"}, status=404)
+    except Exception as e:
+        return Response({"error": f"Error inesperado: {str(e)}"}, status=500)
     
 @api_view(['GET'])
 def proximo_folio(request):
