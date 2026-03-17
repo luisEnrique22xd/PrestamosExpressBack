@@ -1,7 +1,9 @@
 """
 Django settings for core project.
 """
+import dj_database_url
 
+import os
 from pathlib import Path
 from datetime import timedelta
 
@@ -9,13 +11,13 @@ from datetime import timedelta
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-vp!l4w=ecjz8(w&0s4t-g8pn1u3#j68)vk$f3)sh39^^tawk#7'
+SECRET_KEY = os.environ.get('SECRET_KEY','django-insecure-vp!l4w=ecjz8(w&0s4t-g8pn1u3#j68)vk$f3)sh39^^tawk#7')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 
 # Configuración de Hosts y CORS
-ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+ALLOWED_HOSTS = ['*']
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -46,7 +48,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware', # Siempre primero
+    'corsheaders.middleware.CorsMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -78,14 +81,11 @@ WSGI_APPLICATION = 'core.wsgi.application'
 
 # Database - PostgreSQL
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'prestamos_express_db',
-        'USER': 'postgres',
-        'PASSWORD': 'admin',
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
+    'default': dj_database_url.config(
+        default=os.environ.get('DATABASE_URL'),
+        conn_max_age=600,
+        ssl_require=True
+    )
 }
 
 # --- CONFIGURACIÓN DE DJANGO REST FRAMEWORK ---
@@ -129,3 +129,4 @@ USE_TZ = True
 # Static files
 STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
