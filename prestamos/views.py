@@ -272,7 +272,13 @@ class RegistrarAbonoView(generics.CreateAPIView):
             "monto": float(abono.monto),
             "saldo_anterior": float(saldo_anterior),
             "nuevo_saldo": float(nuevo_saldo),
-            "cliente": sujeto
+            "cliente": sujeto,
+            # 1. La fecha la sacamos del abono (es un objeto date, strftime funciona directo)
+    "fecha": abono.fecha_pago.strftime("%d/%m/%Y"), 
+    
+    # 2. 🔥 LA CORRECCIÓN: Usamos la hora actual del servidor directamente
+    # Ya que el modelo Abono no guarda la hora en la base de datos.
+    "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S")
         }, status=status.HTTP_201_CREATED, headers=headers)
 
 
@@ -435,11 +441,12 @@ def condonar_mora(request, pk):
         return Response({"error": "No existe el registro"}, status=404)
     
 @api_view(['GET'])
-def obtener_proximo_folio(request):
-    # Buscamos el número más alto en la tabla de Préstamos o Pagarés
-    ultimo_prestamo = Prestamo.objects.aggregate(Max('id'))['id__max'] or 0
-    # El siguiente es el último + 1
-    return Response({'proximo_folio': ultimo_prestamo + 1})
+def proximo_folio(request):
+    # Esto busca el ID más grande de TODOS los préstamos hechos en la historia
+    ultimo_id = Prestamo.objects.aggregate(Max('id'))['id__max'] or 0
+    return Response({
+        "proximo_folio": ultimo_id + 1
+    })
 
 @api_view(['GET'])
 def directorio_hibrido(request):
