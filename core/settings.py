@@ -44,7 +44,6 @@ INSTALLED_APPS = [
     # Librerías Externas
     'rest_framework',
     'rest_framework_simplejwt', # Manejo de Tokens
-    'corsheaders',
     
     # Tus aplicaciones
     'usuarios',
