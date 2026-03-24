@@ -450,22 +450,22 @@ def condonar_mora(request, pk):
     except Exception as e:
         return Response({"error": f"Error inesperado: {str(e)}"}, status=500)
     
-@api_view(['GET', 'POST'])
+@api_view(['GET', 'POST']) # <--- AQUÍ DEBEN ESTAR AMBOS
 def obtener_proximo_folio(request):
     # Obtenemos el único registro del contador (o lo creamos si no existe)
+    # El id=1 asegura que siempre sea el mismo registro y no se duplique
     contador, created = ContadorFolio.objects.get_or_create(id=1)
     
     folio_a_usar = contador.numero_actual
     
-    # Si la petición es para "apartar" el folio (cuando le dan clic a Generar)
+    # Si la petición es POST (cuando le dan clic a "Generar" en el Frontend)
     if request.method == 'POST':
         contador.numero_actual += 1
         contador.save()
         return Response({'folio': folio_a_usar})
     
-    # Si es solo para mostrarlo en el simulador (vista previa)
+    # Si es GET (cuando solo entras a la página para ver cuál sigue)
     return Response({'folio': folio_a_usar})
-
 @api_view(['GET'])
 def directorio_hibrido(request):
     search = request.query_params.get('search', '').lower()
