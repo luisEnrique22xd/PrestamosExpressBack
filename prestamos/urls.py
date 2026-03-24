@@ -1,6 +1,6 @@
 from django.urls import path
 
-from prestamos.views import proximo_folio
+from prestamos.views import obtener_proximo_folio
 from .views import CalendarioPagosView, ClienteDetailView, ClienteListCreateView, EstadisticasDinamicasView, PrestamoListCreateView, RegistrarAbonoView, cartera_vencida_hibrida, detalle_grupo, directorio_hibrido, estadisticas_globales
 from prestamos import views
 
@@ -15,7 +15,7 @@ urlpatterns = [
     path('clientes/directorio-hibrido/', directorio_hibrido, name='directorio-hibrido'),
     path('grupos/<int:pk>/detalle/', detalle_grupo, name='detalle-grupo'),
     path('prestamos/cartera-vencida/', cartera_vencida_hibrida, name='cartera-vencida'),
-    path('proximo-folio/', proximo_folio, name='proximo-folio'),
+    path('proximo-folio/', obtener_proximo_folio, name='proximo-folio'),
     path('penalizaciones/<int:pk>/condonar/', views.condonar_mora, name='condonar-mora'),
     
 ]
