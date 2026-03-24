@@ -452,20 +452,17 @@ def condonar_mora(request, pk):
     
 @api_view(['GET', 'POST']) # <--- AQUÍ DEBEN ESTAR AMBOS
 def obtener_proximo_folio(request):
-    # Obtenemos el único registro del contador (o lo creamos si no existe)
-    # El id=1 asegura que siempre sea el mismo registro y no se duplique
     contador, created = ContadorFolio.objects.get_or_create(id=1)
     
-    folio_a_usar = contador.numero_actual
-    
-    # Si la petición es POST (cuando le dan clic a "Generar" en el Frontend)
+    # Si es POST, aumentamos el número (esto es lo que hace el botón Generar)
     if request.method == 'POST':
+        folio_a_usar = contador.numero_actual
         contador.numero_actual += 1
         contador.save()
-        return Response({'folio': folio_a_usar})
+        return Response({'folio': folio_a_usar}) # Devolvemos 'folio'
     
-    # Si es GET (cuando solo entras a la página para ver cuál sigue)
-    return Response({'folio': folio_a_usar})
+    # Si es GET, solo mostramos el que sigue (lo que hace el useEffect al cargar)
+    return Response({'proximo_folio': contador.numero_actual})
 @api_view(['GET'])
 def directorio_hibrido(request):
     search = request.query_params.get('search', '').lower()
