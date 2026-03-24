@@ -13,6 +13,12 @@ def registrar_log(user, accion, detalle):
             detalle=detalle
         )
         
+class ContadorFolio(models.Model):
+    numero_actual = models.PositiveIntegerField(default=1)
+
+    def __str__(self):
+        return f"Folio Actual: {self.numero_actual}"
+    
 class Grupo(models.Model):
     nombre_grupo = models.CharField(max_length=200, verbose_name="Nombre del Grupo")
     integrantes = models.ManyToManyField('Cliente', related_name='mis_grupos')
@@ -136,8 +142,3 @@ class Penalizacion(models.Model):
         estado = "ACTIVA" if self.activa else "CONDONADA"
         return f"{self.prestamo.cliente.nombre} - {self.fecha_aplicacion} ({estado})"
 
-class ContadorFolio(models.Model):
-    numero_actual = models.PositiveIntegerField(default=1)
-
-    def __str__(self):
-        return f"Folio Actual: {self.numero_actual}"

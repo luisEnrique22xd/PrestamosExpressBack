@@ -450,19 +450,27 @@ def condonar_mora(request, pk):
     except Exception as e:
         return Response({"error": f"Error inesperado: {str(e)}"}, status=500)
     
-@api_view(['GET', 'POST']) # <--- AQUÍ DEBEN ESTAR AMBOS
+@api_view(['GET', 'POST'])
 def obtener_proximo_folio(request):
-    contador, created = ContadorFolio.objects.get_or_create(id=1)
-    
-    # Si es POST, aumentamos el número (esto es lo que hace el botón Generar)
-    if request.method == 'POST':
-        folio_a_usar = contador.numero_actual
-        contador.numero_actual += 1
-        contador.save()
-        return Response({'folio': folio_a_usar}) # Devolvemos 'folio'
-    
-    # Si es GET, solo mostramos el que sigue (lo que hace el useEffect al cargar)
-    return Response({'proximo_folio': contador.numero_actual})
+    try:
+        # get_or_create intenta buscar el ID 1, si no existe lo crea con numero 1
+        contador, created = ContadorFolio.objects.get_or_create(
+            id=1, 
+            defaults={'numero_actual': 1}
+        )
+        
+        if request.method == 'POST':
+            folio_a_usar = contador.numero_actual
+            contador.numero_actual += 1
+            contador.save()
+            return Response({'folio': folio_a_usar})
+        
+        # Para el GET devolvemos proximo_folio para que tu Frontend no truene
+        return Response({'proximo_folio': contador.numero_actual})
+
+    except Exception as e:
+        # Si algo falla, devolvemos un error claro en lugar de un 500 genérico
+        return Response({"error": str(e)}, status=500)
 @api_view(['GET'])
 def directorio_hibrido(request):
     search = request.query_params.get('search', '').lower()
