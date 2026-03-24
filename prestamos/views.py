@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 
-from .models import Prestamo, Cliente, Abono, Penalizacion, registrar_log, Grupo
+from .models import ContadorFolio, Prestamo, Cliente, Abono, Penalizacion, registrar_log, Grupo
 from .serializers import ClienteSerializer, DirectorioHibridoSerializer, PrestamoSerializer, AbonoSerializer
 
 
@@ -450,13 +450,21 @@ def condonar_mora(request, pk):
     except Exception as e:
         return Response({"error": f"Error inesperado: {str(e)}"}, status=500)
     
-@api_view(['GET'])
-def proximo_folio(request):
-    # Esto busca el ID más grande de TODOS los préstamos hechos en la historia
-    ultimo_id = Prestamo.objects.aggregate(Max('id'))['id__max'] or 0
-    return Response({
-        "proximo_folio": ultimo_id + 1
-    })
+@api_view(['GET', 'POST'])
+def obtener_proximo_folio(request):
+    # Obtenemos el único registro del contador (o lo creamos si no existe)
+    contador, created = ContadorFolio.objects.get_or_create(id=1)
+    
+    folio_a_usar = contador.numero_actual
+    
+    # Si la petición es para "apartar" el folio (cuando le dan clic a Generar)
+    if request.method == 'POST':
+        contador.numero_actual += 1
+        contador.save()
+        return Response({'folio': folio_a_usar})
+    
+    # Si es solo para mostrarlo en el simulador (vista previa)
+    return Response({'folio': folio_a_usar})
 
 @api_view(['GET'])
 def directorio_hibrido(request):

@@ -58,8 +58,7 @@ class Prestamo(models.Model):
     modalidad = models.CharField(max_length=1, choices=MODALIDADES)
     cuotas = models.IntegerField()
     fecha_inicio = models.DateTimeField(auto_now_add=True)
-    folio_pagare = models.IntegerField(null=True, blank=True, editable=False)
-    # Información del Aval
+    folio_pagare = models.IntegerField(null=True, blank=True)    # Información del Aval
     nombre_aval = models.CharField(max_length=200)
     telefono_aval = models.CharField(max_length=15)
     direccion_aval = models.TextField()
@@ -71,16 +70,12 @@ class Prestamo(models.Model):
     monto_total_pagar = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
 
     def save(self, *args, **kwargs):
-        if not self.folio_pagare:
-            # Buscamos el valor máximo actual de folio_pagare
+        # Si el préstamo es nuevo y NO trae folio (por si se registra manual en admin)
+        if not self.id and not self.folio_pagare:
             from django.db.models import Max
-            max_folio = Prestamo.objects.aggregate(Max('folio_pagare'))['folio_pagare__max']
+            max_p = Prestamo.objects.aggregate(Max('folio_pagare'))['folio_pagare__max'] or 0
+            self.folio_pagare = max_p + 1
             
-            if max_folio is not None:
-                self.folio_pagare = max_folio + 1
-            else:
-                self.folio_pagare = 1 # Si la tabla está vacía o todos son null
-                
         super(Prestamo, self).save(*args, **kwargs)
 
     def __str__(self):
@@ -141,3 +136,8 @@ class Penalizacion(models.Model):
         estado = "ACTIVA" if self.activa else "CONDONADA"
         return f"{self.prestamo.cliente.nombre} - {self.fecha_aplicacion} ({estado})"
 
+class ContadorFolio(models.Model):
+    numero_actual = models.PositiveIntegerField(default=1)
+
+    def __str__(self):
+        return f"Folio Actual: {self.numero_actual}"
