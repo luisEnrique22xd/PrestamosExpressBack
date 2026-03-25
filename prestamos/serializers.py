@@ -229,7 +229,7 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     num_integrantes = serializers.SerializerMethodField()
     ultimo_prestamo_id = serializers.SerializerMethodField()
     datos_ultimo_aval = serializers.SerializerMethodField()
-    penalizaciones = serializers.JSONField()
+    total_penalizaciones = serializers.FloatField()
 
     def get_total_penalizaciones(self, obj):
         # Buscamos el último préstamo y sumamos sus penalizaciones activas
