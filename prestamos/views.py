@@ -240,44 +240,42 @@ class RegistrarAbonoView(generics.CreateAPIView):
     
     # prestamos/views.py -> RegistrarAbonoView
 
+# prestamos/views.py -> RegistrarAbonoView
+
 def create(self, request, *args, **kwargs):
     monto_multa_pagado = Decimal(request.data.get('monto_penalizacion', '0.00'))
-    prestamo_id = request.data.get('prestamo')
     
     serializer = self.get_serializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     prestamo = serializer.validated_data['prestamo']
 
-    # 1. CALCULAMOS LA DEUDA ANTES DEL PAGO
-    # Deuda de capital (Total a pagar - lo que ya había abonado)
+    # 1. Cálculos de saldos reales ANTES del pago
     pago_antes = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
     saldo_cap_antes = prestamo.monto_total_pagar - pago_antes
-    
-    # Deuda de multas (Solo las activas antes de este proceso)
     m_activas = prestamo.penalizaciones.filter(activa=True)
     total_m_antes = m_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
     
-    # 🔥 SALDO ANTERIOR TOTAL (Esto es lo que verá Alexander en el primer renglón del cuadro)
     saldo_anterior_total = float(saldo_cap_antes) + float(total_m_antes)
 
-    # 2. PROCESAMOS EL PAGO
+    # 2. Procesar el pago
     if monto_multa_pagado > 0:
         m_activas.update(activa=False)
 
     self.perform_create(serializer)
     abono = serializer.instance
     
-    # 3. NUEVO SALDO (Solo queda el capital restante, la mora ya se limpió)
+    # 3. Nuevo saldo capital
     nuevo_saldo_final = float(saldo_cap_antes) - float(abono.monto)
-    
-    sujeto = prestamo.grupo.nombre_grupo if prestamo.tipo == 'G' else prestamo.cliente.nombre
+    sujeto = prestamo.grupo.nombre_grupo if prestamo.tipo == 'G' and prestamo.grupo else prestamo.cliente.nombre
 
+    # 🔥 ESTO ES LO QUE LE FALTA A TU CÓDIGO ACTUAL:
+    # Debemos devolver TODA la información que el Ticket necesita
     return Response({
         "id": abono.id,
         "monto": float(abono.monto),
         "penalizaciones_pagadas": float(monto_multa_pagado),
-        "saldo_anterior": saldo_anterior_total, # <--- Ahora enviará 3645.00
-        "nuevo_saldo": nuevo_saldo_final,       # <--- Ahora enviará 3150.00
+        "saldo_anterior": saldo_anterior_total,
+        "nuevo_saldo": nuevo_saldo_final,
         "cliente": sujeto,
         "fecha": abono.fecha_pago.strftime("%d/%m/%Y"),
         "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S")
