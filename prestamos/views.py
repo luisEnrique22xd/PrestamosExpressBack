@@ -465,8 +465,6 @@ def obtener_proximo_folio(request):
 @api_view(['GET'])
 def directorio_hibrido(request):
     search = request.query_params.get('search', '').lower()
-    
-    # 1. Obtenemos Clientes y Grupos
     clientes = Cliente.objects.all()
     grupos = Grupo.objects.all()
     
@@ -474,53 +472,56 @@ def directorio_hibrido(request):
         clientes = clientes.filter(nombre__icontains=search)
         grupos = grupos.filter(nombre_grupo__icontains=search)
 
-    # 2. Procesamos Clientes
     data_final = []
+
+    # --- PROCESAR CLIENTES ---
     for c in clientes:
-        # Buscamos su préstamo activo
         p = Prestamo.objects.filter(cliente=c, activo=True).first()
-        
-        # Inyectamos datos dinámicos al objeto
         c.es_grupo = False
         if p:
+            # 1. Calculamos saldo de capital
             total_abonado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+            saldo_capital = float(p.monto_total_pagar) - float(total_abonado)
+            
+            # 2. 🔥 SUMAMOS LAS PENALIZACIONES ACTIVAS
+            multas_activas = Penalizacion.objects.filter(prestamo=p, activa=True)
+            total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+            
             c.tiene_prestamo_activo = True
             c.ultimo_prestamo_id = p.id
-            c.saldo_actual = float(p.monto_total_pagar) - float(total_abonado)
-            # Traemos las multas activas
-            multas = Penalizacion.objects.filter(prestamo=p, activa=True)
-            c.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas]
+            # El saldo ahora incluye las multas
+            c.saldo_actual = saldo_capital + float(total_multas) 
+            c.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas_activas]
         else:
             c.tiene_prestamo_activo = False
-            c.penalizaciones = []
             c.saldo_actual = 0
-            
+            c.penalizaciones = []
         data_final.append(c)
 
-    # 3. Procesamos Grupos
+    # --- PROCESAR GRUPOS ---
     for g in grupos:
         p = Prestamo.objects.filter(grupo=g, activo=True).first()
-        
         g.es_grupo = True
-        g.nombre = g.nombre_grupo # Mapeamos para que el Serializer no se confunda
-        
+        g.nombre = g.nombre_grupo
         if p:
             total_abonado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+            saldo_capital = float(p.monto_total_pagar) - float(total_abonado)
+            
+            # 🔥 SUMAMOS LAS PENALIZACIONES ACTIVAS DEL GRUPO
+            multas_activas = Penalizacion.objects.filter(prestamo=p, activa=True)
+            total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+            
             g.tiene_prestamo_activo = True
             g.ultimo_prestamo_id = p.id
-            g.saldo_actual = float(p.monto_total_pagar) - float(total_abonado)
-            multas = Penalizacion.objects.filter(prestamo=p, activa=True)
-            g.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas]
+            g.saldo_actual = saldo_capital + float(total_multas)
+            g.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas_activas]
         else:
             g.tiene_prestamo_activo = False
-            g.penalizaciones = []
             g.saldo_actual = 0
-            
+            g.penalizaciones = []
         data_final.append(g)
 
-    # 4. Ordenar y Serializar
     data_final.sort(key=lambda x: x.id, reverse=True)
-    
     serializer = DirectorioHibridoSerializer(data_final, many=True)
     return Response(serializer.data)
 @api_view(['GET'])
@@ -629,13 +630,13 @@ def cartera_vencida_hibrida(request):
             
             # Calculamos días de atraso
             dias_atraso = (hoy - fecha_vencimiento).days
-
+            multas_p = p.penalizaciones.filter(activa=True).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
             data_cartera.append({
                 "id_prestamo": p.id,
                 "id_entidad": id_entidad,
                 "nombre_deudor": nombre,
                 "es_grupo": es_grupo,
-                "monto_vencido": p.monto_total_pagar / p.cuotas, # Estimado de una cuota
+               "monto_vencido": (p.monto_total_pagar / p.cuotas) + multas_p, # Estimado de una cuota
                 "dias_atraso": dias_atraso,
                 "fecha_vencimiento": fecha_vencimiento,
                 "num_cuota": (p.abonos.count() + 1),
