@@ -466,33 +466,62 @@ def obtener_proximo_folio(request):
 def directorio_hibrido(request):
     search = request.query_params.get('search', '').lower()
     
-    # 1. Obtenemos Clientes
+    # 1. Obtenemos Clientes y Grupos
     clientes = Cliente.objects.all()
+    grupos = Grupo.objects.all()
+    
     if search:
         clientes = clientes.filter(nombre__icontains=search)
-    
-    # 2. Obtenemos Grupos
-    grupos = Grupo.objects.all()
-    if search:
         grupos = grupos.filter(nombre_grupo__icontains=search)
 
-    # 3. Marcamos quién es quién
-    data_clientes = []
+    # 2. Procesamos Clientes
+    data_final = []
     for c in clientes:
-        c.es_grupo = False
-        data_clientes.append(c)
+        # Buscamos su préstamo activo
+        p = Prestamo.objects.filter(cliente=c, activo=True).first()
         
-    data_grupos = []
-    for g in grupos:
-        g.es_grupo = True
-        data_grupos.append(g)
+        # Inyectamos datos dinámicos al objeto
+        c.es_grupo = False
+        if p:
+            total_abonado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+            c.tiene_prestamo_activo = True
+            c.ultimo_prestamo_id = p.id
+            c.saldo_actual = float(p.monto_total_pagar) - float(total_abonado)
+            # Traemos las multas activas
+            multas = Penalizacion.objects.filter(prestamo=p, activa=True)
+            c.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas]
+        else:
+            c.tiene_prestamo_activo = False
+            c.penalizaciones = []
+            c.saldo_actual = 0
+            
+        data_final.append(c)
 
-    # 4. Unificamos y Serializamos
-    lista_final = data_clientes + data_grupos
-    # Ordenamos por ID de forma descendente para ver lo más nuevo arriba
-    lista_final.sort(key=lambda x: x.id, reverse=True)
+    # 3. Procesamos Grupos
+    for g in grupos:
+        p = Prestamo.objects.filter(grupo=g, activo=True).first()
+        
+        g.es_grupo = True
+        g.nombre = g.nombre_grupo # Mapeamos para que el Serializer no se confunda
+        
+        if p:
+            total_abonado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+            g.tiene_prestamo_activo = True
+            g.ultimo_prestamo_id = p.id
+            g.saldo_actual = float(p.monto_total_pagar) - float(total_abonado)
+            multas = Penalizacion.objects.filter(prestamo=p, activa=True)
+            g.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas]
+        else:
+            g.tiene_prestamo_activo = False
+            g.penalizaciones = []
+            g.saldo_actual = 0
+            
+        data_final.append(g)
+
+    # 4. Ordenar y Serializar
+    data_final.sort(key=lambda x: x.id, reverse=True)
     
-    serializer = DirectorioHibridoSerializer(lista_final, many=True)
+    serializer = DirectorioHibridoSerializer(data_final, many=True)
     return Response(serializer.data)
 @api_view(['GET'])
 def detalle_grupo(request, pk):
