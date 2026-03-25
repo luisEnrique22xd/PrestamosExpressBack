@@ -239,48 +239,39 @@ class RegistrarAbonoView(generics.CreateAPIView):
     serializer_class = AbonoSerializer
     
     def create(self, request, *args, **kwargs):
+        # 1. Extraemos el dinero destinado a multas
+        monto_multa_pagado = Decimal(request.data.get('monto_penalizacion', '0.00'))
+        prestamo_id = request.data.get('prestamo')
+        
+        # 2. Si pagó multas, las desactivamos en la DB
+        if monto_multa_pagado > 0:
+            Penalizacion.objects.filter(prestamo_id=prestamo_id, activa=True).update(activa=False)
+
+        # 3. Guardar el abono normal al capital
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-    
         prestamo = serializer.validated_data['prestamo']
-    
-        # 1. Saldo antes de este abono
+        
+        # Calculamos saldos antes de guardar
         total_pagado_antes = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
         saldo_anterior = prestamo.monto_total_pagar - total_pagado_antes
-    
-        # 2. Guardar el abono
+        
         self.perform_create(serializer)
         abono = serializer.instance
-    
-        # 3. Saldo después de este abono
-        total_pagado_ahora = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-        nuevo_saldo = prestamo.monto_total_pagar - total_pagado_ahora
-    
-        # 4. Registro de auditoría (DEBE IR ANTES DEL RETURN)
+        
+        # 4. Respuesta completa para el Ticket
         sujeto = prestamo.grupo.nombre_grupo if prestamo.tipo == 'G' else prestamo.cliente.nombre
-        registrar_log(
-            self.request.user, 
-            "REGISTRO_PAGO", 
-            f"Abono de ${abono.monto} (Semana {abono.semana_numero}) al préstamo #{prestamo.id} de {sujeto}"
-        )
-
-        headers = self.get_success_headers(serializer.data)
-    
-        # 5. Respuesta para el ticket
+        
         return Response({
             "id": abono.id,
             "monto": float(abono.monto),
+            "multas_pagadas": float(monto_multa_pagado), # <--- DATO CLAVE PARA EL TICKET
             "saldo_anterior": float(saldo_anterior),
-            "nuevo_saldo": float(nuevo_saldo),
+            "nuevo_saldo": float(prestamo.monto_total_pagar - (total_pagado_antes + abono.monto)),
             "cliente": sujeto,
-            # 1. La fecha la sacamos del abono (es un objeto date, strftime funciona directo)
-    "fecha": abono.fecha_pago.strftime("%d/%m/%Y"), 
-    
-    # 2. 🔥 LA CORRECCIÓN: Usamos la hora actual del servidor directamente
-    # Ya que el modelo Abono no guarda la hora en la base de datos.
-    "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S")
-        }, status=status.HTTP_201_CREATED, headers=headers)
-
+            "fecha": abono.fecha_pago.strftime("%d/%m/%Y"),
+            "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S")
+        }, status=status.HTTP_201_CREATED)
 
 # ==============================
 # ESTADÍSTICAS DINÁMICAS (GRÁFICAS)
