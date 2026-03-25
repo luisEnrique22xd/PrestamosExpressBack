@@ -238,48 +238,51 @@ class RegistrarAbonoView(generics.CreateAPIView):
     queryset = Abono.objects.all()
     serializer_class = AbonoSerializer
     
-    # prestamos/views.py -> RegistrarAbonoView
+    def create(self, request, *args, **kwargs):
+        # 1. Extraemos el monto de penalización del request
+        monto_multa_pagado = Decimal(request.data.get('monto_penalizacion', '0.00'))
+        
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        prestamo = serializer.validated_data['prestamo']
 
-# prestamos/views.py -> RegistrarAbonoView
+        # 2. Cálculos de saldos reales ANTES del pago
+        # Deuda de capital actual
+        total_abonado_antes = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+        saldo_cap_antes = prestamo.monto_total_pagar - total_abonado_antes
+        
+        # Multas activas antes del pago
+        m_activas = prestamo.penalizaciones.filter(activa=True)
+        total_m_antes = m_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+        
+        # Saldo anterior real (Capital + Mora)
+        saldo_anterior_total = float(saldo_cap_antes) + float(total_m_antes)
 
-def create(self, request, *args, **kwargs):
-    monto_multa_pagado = Decimal(request.data.get('monto_penalizacion', '0.00'))
-    
-    serializer = self.get_serializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    prestamo = serializer.validated_data['prestamo']
+        # 3. Procesar el pago de multas si existe
+        if monto_multa_pagado > 0:
+            m_activas.update(activa=False)
 
-    # 1. Cálculos de saldos reales ANTES del pago
-    pago_antes = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-    saldo_cap_antes = prestamo.monto_total_pagar - pago_antes
-    m_activas = prestamo.penalizaciones.filter(activa=True)
-    total_m_antes = m_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
-    
-    saldo_anterior_total = float(saldo_cap_antes) + float(total_m_antes)
+        # 4. Guardar el abono normal
+        self.perform_create(serializer)
+        abono = serializer.instance
+        
+        # 5. Nuevo saldo (Solo capital restante, la mora ya se limpió)
+        nuevo_saldo_final = float(saldo_cap_antes) - float(abono.monto)
+        
+        # Identificar al cliente o grupo
+        sujeto = prestamo.grupo.nombre_grupo if prestamo.tipo == 'G' and prestamo.grupo else prestamo.cliente.nombre
 
-    # 2. Procesar el pago
-    if monto_multa_pagado > 0:
-        m_activas.update(activa=False)
-
-    self.perform_create(serializer)
-    abono = serializer.instance
-    
-    # 3. Nuevo saldo capital
-    nuevo_saldo_final = float(saldo_cap_antes) - float(abono.monto)
-    sujeto = prestamo.grupo.nombre_grupo if prestamo.tipo == 'G' and prestamo.grupo else prestamo.cliente.nombre
-
-    # 🔥 ESTO ES LO QUE LE FALTA A TU CÓDIGO ACTUAL:
-    # Debemos devolver TODA la información que el Ticket necesita
-    return Response({
-        "id": abono.id,
-        "monto": float(abono.monto),
-        "penalizaciones_pagadas": float(monto_multa_pagado),
-        "saldo_anterior": saldo_anterior_total,
-        "nuevo_saldo": nuevo_saldo_final,
-        "cliente": sujeto,
-        "fecha": abono.fecha_pago.strftime("%d/%m/%Y"),
-        "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S")
-    }, status=status.HTTP_201_CREATED)
+        # 🔥 LA CLAVE: Devolver el JSON completo para el Ticket
+        return Response({
+            "id": abono.id,
+            "monto": float(abono.monto),
+            "penalizaciones_pagadas": float(monto_multa_pagado),
+            "saldo_anterior": saldo_anterior_total,
+            "nuevo_saldo": nuevo_saldo_final,
+            "cliente": sujeto,
+            "fecha": abono.fecha_pago.strftime("%d/%m/%Y"),
+            "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S")
+        }, status=status.HTTP_201_CREATED)
 # ==============================
 # ESTADÍSTICAS DINÁMICAS (GRÁFICAS)
 # ==============================
