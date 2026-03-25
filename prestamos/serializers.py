@@ -218,74 +218,44 @@ class AbonoSerializer(serializers.ModelSerializer):
 class DirectorioHibridoSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     nombre = serializers.SerializerMethodField()
-    saldo_actual = serializers.FloatField()
+    es_grupo = serializers.BooleanField()
+    # Los declaramos solo como MethodField para que usen tus funciones de abajo
+    saldo_actual = serializers.SerializerMethodField()
     total_penalizaciones = serializers.SerializerMethodField()
     id_mora_activa = serializers.SerializerMethodField()
-    es_grupo = serializers.BooleanField()
-    saldo_actual = serializers.SerializerMethodField()
     tiene_prestamo_activo = serializers.SerializerMethodField()
+    
     telefono = serializers.CharField(required=False, allow_null=True)
     direccion = serializers.CharField(required=False, allow_null=True)
     num_integrantes = serializers.SerializerMethodField()
     ultimo_prestamo_id = serializers.SerializerMethodField()
     datos_ultimo_aval = serializers.SerializerMethodField()
-    total_penalizaciones = serializers.FloatField()
+    penalizaciones = serializers.JSONField() # Este es el que usa la lista de multas
 
     def get_total_penalizaciones(self, obj):
-        # Buscamos el último préstamo y sumamos sus penalizaciones activas
-        # Si 'obj' es un Cliente, buscamos sus préstamos
-        ultimo_p = obj.prestamos.filter(activo=True).last()
-        if ultimo_p:
-            # Sumamos los montos de penalizaciones activas
-            return sum(p.monto_penalizado for p in ultimo_p.penalizaciones.filter(activa=True))
-        return 0.0
+        # Usamos getattr porque obj puede no tener el atributo si no tiene prestamo activo
+        return getattr(obj, 'total_penalizaciones', 0.0)
 
     def get_id_mora_activa(self, obj):
-        ultimo_p = obj.prestamos.filter(activo=True).last()
-        if ultimo_p:
-            # Traemos el ID de la última mora activa para el botón de condonar
-            mora = ultimo_p.penalizaciones.filter(activa=True).last()
-            return mora.id if mora else None
-        return None
+        return getattr(obj, 'id_mora_activa', None)
 
     def get_nombre(self, obj):
         return obj.nombre if hasattr(obj, 'nombre') else obj.nombre_grupo
 
-    def _get_prestamo_activo(self, obj):
-        if obj.es_grupo:
-            return Prestamo.objects.filter(grupo_id=obj.id, activo=True).last()
-        return Prestamo.objects.filter(cliente_id=obj.id, activo=True).last()
-
     def get_ultimo_prestamo_id(self, obj):
-        p = self._get_prestamo_activo(obj)
-        return p.id if p else None
+        return getattr(obj, 'ultimo_prestamo_id', None)
 
     def get_saldo_actual(self, obj):
-        p = self._get_prestamo_activo(obj)
-        if not p: return 0.0
-        total_abonado = Abono.objects.filter(prestamo=p).aggregate(Sum('monto'))['monto__sum'] or Decimal('0.00')
-        saldo = Decimal(p.monto_total_pagar) - total_abonado
-        return float(max(Decimal('0.00'), saldo))
+        return getattr(obj, 'saldo_actual', 0.0)
 
     def get_tiene_prestamo_activo(self, obj):
-        return self._get_prestamo_activo(obj) is not None
+        return getattr(obj, 'tiene_prestamo_activo', False)
+
     def get_datos_ultimo_aval(self, obj):
-        # Buscamos el último préstamo (activo o no) para sacar al aval
-        if obj.es_grupo:
-            p = Prestamo.objects.filter(grupo_id=obj.id).last()
-        else:
-            p = Prestamo.objects.filter(cliente_id=obj.id).last()
-            
-        if p:
-            return {
-                "nombre_aval": p.nombre_aval,
-                "telefono_aval": p.telefono_aval
-            }
-        return None
+        return getattr(obj, 'datos_ultimo_aval', None)
 
     def get_num_integrantes(self, obj):
         return obj.integrantes.count() if hasattr(obj, 'integrantes') else 1
-
 # 5. SERIALIZER PARA LA BÓVEDA DE TICKETS (En Perfil de Usuario)
 class HistorialPagosSerializer(serializers.ModelSerializer):
     cliente = serializers.SerializerMethodField()
