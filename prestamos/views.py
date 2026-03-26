@@ -356,22 +356,26 @@ class CalendarioPagosView(APIView):
         ).prefetch_related("abonos")
 
         for p in prestamos:
-
+            # Forzamos a que la fecha base sea solo la FECHA (sin horas/minutos)
             fecha_base = to_date(p.fecha_inicio)
 
             for i in range(1, p.cuotas + 1):
-
                 if p.modalidad == "S":
-                    fecha_pago = fecha_base + timedelta(weeks=i)
+                    # Usamos days=7*i para control total del incremento
+                    fecha_pago = fecha_base + timedelta(days=7 * i)
 
                 elif p.modalidad == "Q":
+                    # 15 días exactos
                     fecha_pago = fecha_base + timedelta(days=15 * i)
 
                 else:
+                    # Mensual: 30 días exactos
                     fecha_pago = fecha_base + timedelta(days=30 * i)
 
+                # Convertimos a objeto date puro antes de cualquier validación
                 fecha_pago = to_date(fecha_pago)
 
+                # REGLA DE DOMINGOS: Si cae en domingo (6), se pasa al lunes
                 if fecha_pago.weekday() == 6:
                     fecha_pago += timedelta(days=1)
 
