@@ -1,5 +1,6 @@
 from datetime import datetime, date, timedelta
 from decimal import Decimal
+import pytz
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from django.utils import timezone
 from django.db.models import Max, Sum, Count, DecimalField
@@ -333,76 +334,45 @@ class EstadisticasDinamicasView(APIView):
 # ==============================
 # CALENDARIO DE PAGOS
 # ==============================
-
-def to_date(value):
-    if isinstance(value, datetime):
-        return value.date()
-    return value
-
-
+def get_mexico_date(dt_obj):
+    mexico_tz = pytz.timezone('America/Mexico_City')
+    if dt_obj.tzinfo is None: # Si es naive
+        return dt_obj
+    return dt_obj.astimezone(mexico_tz).date()
 class CalendarioPagosView(APIView):
-
     def get(self, request):
-
-        hoy = date.today()
-
+        hoy = get_mexico_date(timezone.now())
         mes = int(request.query_params.get("mes", hoy.month))
         anio = int(request.query_params.get("anio", hoy.year))
 
         proyecciones = []
-
-        prestamos = Prestamo.objects.filter(activo=True).select_related(
-            "cliente"
-        ).prefetch_related("abonos")
-
-        # Modifica tu ciclo for en CalendarioPagosView de views.py:
+        prestamos = Prestamo.objects.filter(activo=True).select_related("cliente", "grupo")
 
         for p in prestamos:
-            # 1. Traemos la fecha de inicio y la convertimos a la zona horaria de México antes de proyectar
-            # Esto evita que los préstamos de la tarde "salten" al día siguiente
-            fecha_base = to_date(p.fecha_inicio) 
+            # Forzamos fecha base real de México
+            fecha_base = get_mexico_date(p.fecha_inicio)
 
             for i in range(1, p.cuotas + 1):
                 if p.modalidad == "S":
-                    # Semanal: 7 días exactos
                     fecha_pago = fecha_base + timedelta(days=7 * i)
                 elif p.modalidad == "Q":
-                    # Quincenal: 15 días exactos
                     fecha_pago = fecha_base + timedelta(days=15 * i)
                 else:
-                    # Mensual: 30 días exactos
                     fecha_pago = fecha_base + timedelta(days=30 * i)
 
-                # Volvemos a asegurar que sea solo fecha
-                fecha_pago = to_date(fecha_pago)
-
-                # REGLA DE DOMINGOS: Si cae en domingo (6), se pasa al lunes
-                if fecha_pago.weekday() == 6:
+                if fecha_pago.weekday() == 6: # Domingo -> Lunes
                     fecha_pago += timedelta(days=1)
 
                 if fecha_pago.month == mes and fecha_pago.year == anio:
-
                     ya_pagado = p.abonos.filter(semana_numero=i).exists()
-
-                    if ya_pagado:
-                        estatus = "pagado"
-
-                    elif fecha_pago < hoy:
-                        estatus = "vencido"
-
-                    else:
-                        estatus = "pendiente"
-
                     proyecciones.append({
                         "id": f"{p.id}-{i}",
-                        "cliente": p.cliente.nombre,
-                        "idCliente": p.cliente.id,
-                        "tel": p.cliente.telefono,
+                        "cliente": p.cliente.nombre if p.cliente else p.grupo.nombre_grupo,
+                        "idCliente": p.cliente.id if p.cliente else p.grupo.id,
                         "fecha": fecha_pago.strftime("%Y-%m-%d"),
                         "monto": round(p.monto_total_pagar / p.cuotas, 2),
-                        "estatus": estatus
+                        "estatus": "pagado" if ya_pagado else ("vencido" if fecha_pago < hoy else "pendiente")
                     })
-
         return Response(proyecciones)
 
 
