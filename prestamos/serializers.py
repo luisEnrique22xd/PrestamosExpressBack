@@ -224,7 +224,6 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     total_penalizaciones = serializers.SerializerMethodField()
     id_mora_activa = serializers.SerializerMethodField()
     tiene_prestamo_activo = serializers.SerializerMethodField()
-    datos_ultimo_aval = serializers.SerializerMethodField()
     telefono = serializers.CharField(required=False, allow_null=True)
     direccion = serializers.CharField(required=False, allow_null=True)
     num_integrantes = serializers.SerializerMethodField()
@@ -233,29 +232,20 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     penalizaciones = serializers.JSONField() # Este es el que usa la lista de multas
 
     def get_datos_ultimo_aval(self, obj):
-        from prestamos.models import Prestamo # Importación local para evitar errores
+        from prestamos.models import Prestamo
         
-        # Obtenemos el ID del último préstamo que ya está calculado en el objeto
-        # Si no existe, usamos la lógica de búsqueda
-        prestamo_id = getattr(obj, 'ultimo_prestamo_id', None)
+        # Usamos el método que ya tenemos para obtener el ID
+        prestamo_id = self.get_ultimo_prestamo_id(obj)
         
-        prestamo = None
         if prestamo_id:
             prestamo = Prestamo.objects.filter(id=prestamo_id).first()
-        else:
-            # Si por alguna razón no tenemos el ID, lo buscamos manualmente
-            if getattr(obj, 'es_grupo', False):
-                prestamo = Prestamo.objects.filter(grupo=obj).order_by('-fecha_creacion').first()
-            else:
-                prestamo = Prestamo.objects.filter(cliente=obj).order_by('-fecha_creacion').first()
-
-        # Si encontramos el préstamo, devolvemos los campos exactos del modelo
-        if prestamo and prestamo.nombre_aval:
-            return {
-                "nombre_aval": prestamo.nombre_aval,
-                "telefono_aval": prestamo.telefono_aval
-            }
-        
+            if prestamo and prestamo.nombre_aval:
+                return {
+                    "nombre_aval": prestamo.nombre_aval,
+                    "telefono_aval": prestamo.telefono_aval,
+                    "direccion_aval": prestamo.direccion_aval,
+                    "parentesco_aval": prestamo.parentesco_aval
+                }
         return None
     def get_total_penalizaciones(self, obj):
         # Usamos getattr porque obj puede no tener el atributo si no tiene prestamo activo
