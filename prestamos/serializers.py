@@ -232,6 +232,22 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     datos_ultimo_aval = serializers.SerializerMethodField()
     penalizaciones = serializers.JSONField() # Este es el que usa la lista de multas
 
+    def get_datos_ultimo_aval(self, obj):
+        # Intentamos obtener el último préstamo (sea de cliente o grupo)
+        from .models import Prestamo # Import local para evitar importación circular
+        
+        prestamo = None
+        if getattr(obj, 'es_grupo', False):
+            prestamo = Prestamo.objects.filter(grupo=obj).order_by('-fecha_creacion').first()
+        else:
+            prestamo = Prestamo.objects.filter(cliente=obj).order_by('-fecha_creacion').first()
+
+        if prestamo:
+            return {
+                "nombre_aval": prestamo.nombre_aval,
+                "telefono_aval": prestamo.telefono_aval
+            }
+        return None
     def get_total_penalizaciones(self, obj):
         # Usamos getattr porque obj puede no tener el atributo si no tiene prestamo activo
         return getattr(obj, 'total_penalizaciones', 0.0)
