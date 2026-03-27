@@ -266,9 +266,6 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     def get_tiene_prestamo_activo(self, obj):
         return getattr(obj, 'tiene_prestamo_activo', False)
 
-    def get_datos_ultimo_aval(self, obj):
-        return getattr(obj, 'datos_ultimo_aval', None)
-
     def get_num_integrantes(self, obj):
         return obj.integrantes.count() if hasattr(obj, 'integrantes') else 1
 # 5. SERIALIZER PARA LA BÓVEDA DE TICKETS (En Perfil de Usuario)
