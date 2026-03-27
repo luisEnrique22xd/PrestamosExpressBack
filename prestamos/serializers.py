@@ -224,7 +224,7 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     total_penalizaciones = serializers.SerializerMethodField()
     id_mora_activa = serializers.SerializerMethodField()
     tiene_prestamo_activo = serializers.SerializerMethodField()
-    
+    datos_ultimo_aval
     telefono = serializers.CharField(required=False, allow_null=True)
     direccion = serializers.CharField(required=False, allow_null=True)
     num_integrantes = serializers.SerializerMethodField()
