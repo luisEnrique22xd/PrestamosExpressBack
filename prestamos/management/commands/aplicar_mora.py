@@ -24,23 +24,24 @@ class Command(BaseCommand):
                 # Nota: El campo en tu modelo se llama 'fecha_penalizacion' según errores previos
                 # Si no existe, Django usará el auto_now_add si lo tienes configurado.
                 # 3. Evitar duplicados: Usamos 'fecha_aplicacion' que es el nombre real
+                # 3. Evitar duplicados: Quitamos "__date" porque el campo ya es tipo Date
                 ya_aplicado = Penalizacion.objects.filter(
                     prestamo=p, 
-                    fecha_aplicacion__date=hoy 
+                    fecha_aplicacion=hoy  # <-- Solo dejamos 'fecha_aplicacion'
                 ).exists()
 
                 if not ya_aplicado:
-                    # 4. Cálculo del 1.5% sobre el CAPITAL INICIAL (campo 'monto')
+                    # 4. Cálculo del 1.5% sobre el CAPITAL (campo 'monto')
                     monto_base = p.monto 
                     monto_mora = monto_base * Decimal('0.015')
                     
-                    # 5. Crear el registro de penalización con los campos que sí existen
+                    # 5. Crear el registro de penalización
                     Penalizacion.objects.create(
                         prestamo=p,
                         monto_penalizado=monto_mora,
                         activa=True,
                         descripcion=f"Recargo automático 1.5% - Día {hoy}",
-                        fecha_aplicacion=timezone.now() # Aseguramos la fecha
+                        fecha_aplicacion=hoy
                     )
                     
                     # 6. Actualizar el saldo total del préstamo
