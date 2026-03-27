@@ -5,37 +5,33 @@ from datetime import timedelta
 from decimal import Decimal
 
 class Command(BaseCommand):
-    help = 'Aplica una penalización del 1.5% diario sobre el capital inicial a préstamos vencidos'
+    help = 'Aplica una penalización del 1.5% diario sobre el monto_capital a préstamos vencidos'
 
     def handle(self, *args, **options):
-        # Usamos la fecha local de México para la comparación
+        # Fecha local de México
         hoy = timezone.localtime(timezone.now()).date()
         
-        # 1. Filtramos préstamos activos y precargamos abonos para velocidad
+        # Filtramos préstamos activos
         prestamos_activos = Prestamo.objects.filter(activo=True).prefetch_related('abonos')
         conteo_aplicados = 0
 
         for p in prestamos_activos:
-            # 2. Verificar si tiene al menos una cuota vencida sin abono
+            # Verificar si tiene atraso real (basado en fechas de cuotas)
             tiene_atraso = self.verificar_atraso_real(p, hoy)
 
             if tiene_atraso:
-                # 3. Evitar duplicados: ¿Ya se le aplicó mora hoy?
-                # Nota: El campo en tu modelo se llama 'fecha_penalizacion' según errores previos
-                # Si no existe, Django usará el auto_now_add si lo tienes configurado.
-                # 3. Evitar duplicados: Usamos 'fecha_aplicacion' que es el nombre real
-                # 3. Evitar duplicados: Quitamos "__date" porque el campo ya es tipo Date
+                # Evitar duplicados: Revisa si ya se aplicó mora el día de HOY
                 ya_aplicado = Penalizacion.objects.filter(
                     prestamo=p, 
-                    fecha_aplicacion=hoy  # <-- Solo dejamos 'fecha_aplicacion'
+                    fecha_aplicacion=hoy 
                 ).exists()
 
                 if not ya_aplicado:
-                    # 4. Cálculo del 1.5% sobre el CAPITAL (campo 'monto')
-                    monto_base = p.monto 
+                    # Cálculo del 1.5% sobre monto_capital (Capital puro)
+                    monto_base = p.monto_capital 
                     monto_mora = monto_base * Decimal('0.015')
                     
-                    # 5. Crear el registro de penalización
+                    # Crear el registro de penalización
                     Penalizacion.objects.create(
                         prestamo=p,
                         monto_penalizado=monto_mora,
@@ -44,28 +40,22 @@ class Command(BaseCommand):
                         fecha_aplicacion=hoy
                     )
                     
-                    # 6. Actualizar el saldo total del préstamo
+                    # Actualizar el saldo total acumulado para el cobro
                     p.monto_total_pagar += monto_mora
                     p.save()
                     
                     conteo_aplicados += 1
-                    self.stdout.write(f"Mora de ${monto_mora} aplicada a: {p.cliente}")
-
-                
+                    self.stdout.write(f"Mora de ${monto_mora} aplicada a: {p.cliente if p.cliente else p.grupo}")
 
         self.stdout.write(self.style.SUCCESS(f'Sincronización terminada: {conteo_aplicados} moras aplicadas.'))
 
     def verificar_atraso_real(self, p, hoy):
-        """
-        Calcula las fechas de pago y revisa si alguna ya pasó y no tiene abono.
-        """
-        # Limpiamos la fecha de inicio de horas para comparar solo días
         fecha_base = p.fecha_inicio
         if hasattr(fecha_base, 'date'):
             fecha_base = fecha_base.date()
 
         for i in range(1, p.cuotas + 1):
-            # 7. Cálculo de fecha según modalidad (S, Q, M)
+            # Lógica de fechas según modalidad
             if p.modalidad in ["Semanal", "S"]:
                 fecha_pago = fecha_base + timedelta(days=7 * i)
             elif p.modalidad in ["Quincenal", "Q"]:
@@ -75,15 +65,12 @@ class Command(BaseCommand):
             else:
                 fecha_pago = fecha_base + timedelta(days=7 * i)
 
-            # Regla de domingos: Si el cobro caía en domingo, se revisa a partir del lunes
-            if fecha_pago.weekday() == 6:
+            if fecha_pago.weekday() == 6: # Domingo -> Lunes
                 fecha_pago += timedelta(days=1)
 
-            # Si la fecha de pago ya pasó (ayer o antes)
+            # Si la fecha de pago ya pasó y no hay abono registrado
             if fecha_pago < hoy:
-                # 8. Revisamos si existe el abono para esa cuota específica
                 pagado = p.abonos.filter(semana_numero=i).exists()
                 if not pagado:
-                    return True # Hay al menos una cuota vieja sin pagar
-        
+                    return True 
         return False
