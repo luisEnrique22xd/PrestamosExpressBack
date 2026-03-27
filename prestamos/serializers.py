@@ -233,20 +233,29 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     penalizaciones = serializers.JSONField() # Este es el que usa la lista de multas
 
     def get_datos_ultimo_aval(self, obj):
-        # Intentamos obtener el último préstamo (sea de cliente o grupo)
-        from .models import Prestamo # Import local para evitar importación circular
+        from prestamos.models import Prestamo # Importación local para evitar errores
+        
+        # Obtenemos el ID del último préstamo que ya está calculado en el objeto
+        # Si no existe, usamos la lógica de búsqueda
+        prestamo_id = getattr(obj, 'ultimo_prestamo_id', None)
         
         prestamo = None
-        if getattr(obj, 'es_grupo', False):
-            prestamo = Prestamo.objects.filter(grupo=obj).order_by('-fecha_creacion').first()
+        if prestamo_id:
+            prestamo = Prestamo.objects.filter(id=prestamo_id).first()
         else:
-            prestamo = Prestamo.objects.filter(cliente=obj).order_by('-fecha_creacion').first()
+            # Si por alguna razón no tenemos el ID, lo buscamos manualmente
+            if getattr(obj, 'es_grupo', False):
+                prestamo = Prestamo.objects.filter(grupo=obj).order_by('-fecha_creacion').first()
+            else:
+                prestamo = Prestamo.objects.filter(cliente=obj).order_by('-fecha_creacion').first()
 
-        if prestamo:
+        # Si encontramos el préstamo, devolvemos los campos exactos del modelo
+        if prestamo and prestamo.nombre_aval:
             return {
                 "nombre_aval": prestamo.nombre_aval,
                 "telefono_aval": prestamo.telefono_aval
             }
+        
         return None
     def get_total_penalizaciones(self, obj):
         # Usamos getattr porque obj puede no tener el atributo si no tiene prestamo activo
