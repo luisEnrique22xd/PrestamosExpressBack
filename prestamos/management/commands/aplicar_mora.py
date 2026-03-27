@@ -23,31 +23,34 @@ class Command(BaseCommand):
                 # 3. Evitar duplicados: ¿Ya se le aplicó mora hoy?
                 # Nota: El campo en tu modelo se llama 'fecha_penalizacion' según errores previos
                 # Si no existe, Django usará el auto_now_add si lo tienes configurado.
+                # 3. Evitar duplicados: Usamos 'fecha_aplicacion' que es el nombre real
                 ya_aplicado = Penalizacion.objects.filter(
                     prestamo=p, 
-                    fecha_penalizacion__date=hoy 
+                    fecha_aplicacion__date=hoy 
                 ).exists()
 
                 if not ya_aplicado:
                     # 4. Cálculo del 1.5% sobre el CAPITAL INICIAL (campo 'monto')
-                    # Si el campo se llama 'monto_prestado', cámbialo aquí:
                     monto_base = p.monto 
                     monto_mora = monto_base * Decimal('0.015')
                     
-                    # 5. Crear el registro de penalización
-                    # Quitamos 'motivo' y 'descripcion' para evitar el TypeError previo
+                    # 5. Crear el registro de penalización con los campos que sí existen
                     Penalizacion.objects.create(
                         prestamo=p,
                         monto_penalizado=monto_mora,
-                        activa=True
+                        activa=True,
+                        descripcion=f"Recargo automático 1.5% - Día {hoy}",
+                        fecha_aplicacion=timezone.now() # Aseguramos la fecha
                     )
                     
-                    # 6. Actualizar el saldo total del préstamo para que Alexander vea el cobro
+                    # 6. Actualizar el saldo total del préstamo
                     p.monto_total_pagar += monto_mora
                     p.save()
                     
                     conteo_aplicados += 1
                     self.stdout.write(f"Mora de ${monto_mora} aplicada a: {p.cliente}")
+
+                
 
         self.stdout.write(self.style.SUCCESS(f'Sincronización terminada: {conteo_aplicados} moras aplicadas.'))
 
