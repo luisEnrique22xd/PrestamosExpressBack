@@ -443,6 +443,8 @@ def obtener_proximo_folio(request):
     except Exception as e:
         # Si algo falla, devolvemos un error claro en lugar de un 500 genérico
         return Response({"error": str(e)}, status=500)
+from django.db.models import Q, Sum # Asegúrate de tener Q importado
+
 @api_view(['GET'])
 def directorio_hibrido(request):
     search = request.query_params.get('search', '').lower()
@@ -450,27 +452,31 @@ def directorio_hibrido(request):
     grupos = Grupo.objects.all()
     
     if search:
-        clientes = clientes.filter(nombre__icontains=search)
-        grupos = grupos.filter(nombre_grupo__icontains=search)
+        # 🔥 CAMBIO AQUÍ: Ahora busca si el nombre contiene el texto O si el ID es igual al número
+        if search.isdigit():
+            # Si el Alexander escribe un número, buscamos por ID exacto o por nombre
+            clientes = clientes.filter(Q(nombre__icontains=search) | Q(id=search))
+            grupos = grupos.filter(Q(nombre_grupo__icontains=search) | Q(id=search))
+        else:
+            # Si es texto, buscamos solo por nombre
+            clientes = clientes.filter(nombre__icontains=search)
+            grupos = grupos.filter(nombre_grupo__icontains=search)
 
     data_final = []
 
-    # --- PROCESAR CLIENTES ---
+    # --- PROCESAR CLIENTES --- (Tu lógica se mantiene igual)
     for c in clientes:
         p = Prestamo.objects.filter(cliente=c, activo=True).first()
         c.es_grupo = False
         if p:
-            # 1. Calculamos saldo de capital
             total_abonado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
             saldo_capital = float(p.monto_total_pagar) - float(total_abonado)
             
-            # 2. 🔥 SUMAMOS LAS PENALIZACIONES ACTIVAS
             multas_activas = Penalizacion.objects.filter(prestamo=p, activa=True)
             total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
             
             c.tiene_prestamo_activo = True
             c.ultimo_prestamo_id = p.id
-            # El saldo ahora incluye las multas
             c.saldo_actual = saldo_capital + float(total_multas) 
             c.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas_activas]
         else:
@@ -479,7 +485,7 @@ def directorio_hibrido(request):
             c.penalizaciones = []
         data_final.append(c)
 
-    # --- PROCESAR GRUPOS ---
+    # --- PROCESAR GRUPOS --- (Tu lógica se mantiene igual)
     for g in grupos:
         p = Prestamo.objects.filter(grupo=g, activo=True).first()
         g.es_grupo = True
@@ -488,7 +494,6 @@ def directorio_hibrido(request):
             total_abonado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
             saldo_capital = float(p.monto_total_pagar) - float(total_abonado)
             
-            # 🔥 SUMAMOS LAS PENALIZACIONES ACTIVAS DEL GRUPO
             multas_activas = Penalizacion.objects.filter(prestamo=p, activa=True)
             total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
             
