@@ -1,3 +1,5 @@
+
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from usuarios.models import LogSistema
@@ -74,6 +76,30 @@ class Prestamo(models.Model):
     activo = models.BooleanField(default=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     monto_total_pagar = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+
+    def clean(self):
+        # 1. Verificar si el cliente ya tiene UN préstamo individual activo
+        if self.cliente:
+            prestamo_activo = Prestamo.objects.filter(cliente=self.cliente, activo=True).exists()
+            if prestamo_activo:
+                raise ValidationError(f"El cliente {self.cliente.nombre} ya tiene un préstamo activo. Debe liquidarlo antes de solicitar otro.")
+
+            # 2. Verificar si el cliente pertenece a un grupo con préstamo activo
+            # (Si tiene crédito grupal, no puede tener individual)
+            en_grupo_activo = Prestamo.objects.filter(grupo__integrantes=self.cliente, activo=True).exists()
+            if en_grupo_activo:
+                raise ValidationError(f"El cliente {self.cliente.nombre} ya forma parte de un grupo con crédito activo. No puede solicitar uno individual.")
+
+        # 3. Verificar si un grupo quiere préstamo pero sus integrantes tienen créditos individuales
+        if self.grupo:
+            # Revisar si el grupo ya tiene uno activo
+            if Prestamo.objects.filter(grupo=self.grupo, activo=True).exists():
+                raise ValidationError(f"El grupo {self.grupo.nombre_grupo} ya tiene un préstamo activo.")
+
+            # Revisar si alguno de los integrantes tiene un préstamo individual activo
+            for integrante in self.grupo.integrantes.all():
+                if Prestamo.objects.filter(cliente=integrante, activo=True).exists():
+                    raise ValidationError(f"No se puede crear el préstamo grupal: El integrante {integrante.nombre} tiene un crédito individual activo.")
 
     def save(self, *args, **kwargs):
         # Si el préstamo es nuevo y NO trae folio (por si se registra manual en admin)
