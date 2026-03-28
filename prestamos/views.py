@@ -444,14 +444,13 @@ def obtener_proximo_folio(request):
         # Si algo falla, devolvemos un error claro en lugar de un 500 genérico
         return Response({"error": str(e)}, status=500)
 
-from django.db.models import Q, Sum
-
 @api_view(['GET'])
 def directorio_hibrido(request):
-    search = request.query_params.get('search', '').strip()
+    search = request.query_params.get('search', '').strip().lower()
     clientes = Cliente.objects.all()
     grupos = Grupo.objects.all()
     
+    # 1. Filtros de búsqueda (ID o Nombre)
     if search:
         filtro_clientes = Q(nombre__icontains=search)
         filtro_grupos = Q(nombre_grupo__icontains=search)
@@ -468,30 +467,29 @@ def directorio_hibrido(request):
     for c in clientes:
         c.es_grupo = False
         
-        # 1. ¿Tiene préstamo individual?
+        # A. ¿Tiene préstamo individual?
         p_ind = Prestamo.objects.filter(cliente=c, activo=True).first()
         
-        # 2. 🔥 BUSQUEDA REFORZADA: ¿Está en un grupo que deba dinero?
-        # Primero buscamos los IDs de los grupos donde este cliente es integrante
+        # B. ¿Pertenece a un grupo que deba dinero? (CASO DULCE MARÍA)
         ids_mis_grupos = Grupo.objects.filter(integrantes=c).values_list('id', flat=True)
-        
-        # Luego buscamos si ALGUNO de esos grupos tiene un préstamo activo
         p_grupal = Prestamo.objects.filter(grupo_id__in=ids_mis_grupos, activo=True).first()
         
         # El préstamo que manda es el individual, si no, el grupal
         p = p_ind or p_grupal
         
         if p:
-            total_abonado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-            saldo_capital = float(p.monto_total_pagar) - float(total_abonado)
-            multas_activas = Penalizacion.objects.filter(prestamo=p, activa=True)
-            total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+            total_abono = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+            saldo_cap = float(p.monto_total_pagar) - float(total_abono)
+            multas = Penalizacion.objects.filter(prestamo=p, activa=True)
+            total_m = multas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
             
             c.tiene_prestamo_activo = True
             c.ultimo_prestamo_id = p.id
-            c.saldo_actual = saldo_capital + float(total_multas)
-            c.total_penalizaciones = float(total_multas)
-            c.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas_activas]
+            # Importante: saldo_actual > 0 para que el front bloquee
+            c.saldo_actual = saldo_cap + float(total_m)
+            c.total_penalizaciones = float(total_m)
+            c.id_mora_activa = multas.last().id if multas.exists() else None
+            c.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas]
         else:
             c.tiene_prestamo_activo = False
             c.saldo_actual = 0
@@ -500,22 +498,27 @@ def directorio_hibrido(request):
             
         data_final.append(c)
 
-    # --- PROCESAR GRUPOS (Igual que antes) ---
+    # --- PROCESAR GRUPOS ---
     for g in grupos:
+        p = Prestamo.objects.filter(grupo=g, activo=True).first()
         g.es_grupo = True
         g.nombre = g.nombre_grupo
-        p_g = Prestamo.objects.filter(grupo=g, activo=True).first()
-        if p_g:
-            total_abonado = p_g.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-            saldo_capital = float(p_g.monto_total_pagar) - float(total_abonado)
-            multas_activas = Penalizacion.objects.filter(prestamo=p_g, activa=True)
-            total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+        if p:
+            total_abono = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+            saldo_cap = float(p.monto_total_pagar) - float(total_abono)
+            multas = Penalizacion.objects.filter(prestamo=p, activa=True)
+            total_m = multas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+            
             g.tiene_prestamo_activo = True
-            g.saldo_actual = saldo_capital + float(total_multas)
-            g.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas_activas]
+            g.ultimo_prestamo_id = p.id
+            g.saldo_actual = saldo_cap + float(total_m)
+            g.total_penalizaciones = float(total_m)
+            g.id_mora_activa = multas.last().id if multas.exists() else None
+            g.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas]
         else:
             g.tiene_prestamo_activo = False
             g.saldo_actual = 0
+            g.total_penalizaciones = 0
             g.penalizaciones = []
         data_final.append(g)
 
@@ -578,66 +581,7 @@ def detalle_grupo(request, pk):
         return Response(data)
     except Grupo.DoesNotExist:
         return Response({"error": "Grupo no encontrado"}, status=404)
-@api_view(['GET'])
-def directorio_hibrido(request):
-    search = request.query_params.get('search', '').lower()
-    clientes = Cliente.objects.all()
-    grupos = Grupo.objects.all()
-    
-    if search:
-        clientes = clientes.filter(nombre__icontains=search)
-        grupos = grupos.filter(nombre_grupo__icontains=search)
 
-    data_final = []
-
-    for c in clientes:
-        p = Prestamo.objects.filter(cliente=c, activo=True).first()
-        c.es_grupo = False
-        if p:
-            total_abono = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-            saldo_cap = float(p.monto_total_pagar) - float(total_abono)
-            multas = Penalizacion.objects.filter(prestamo=p, activa=True)
-            total_m = multas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
-            
-            c.tiene_prestamo_activo = True
-            c.ultimo_prestamo_id = p.id
-            c.saldo_actual = saldo_cap
-            c.total_penalizaciones = float(total_m)
-            c.id_mora_activa = multas.last().id if multas.exists() else None
-            c.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas]
-        else:
-            c.tiene_prestamo_activo = False
-            c.saldo_actual = 0
-            c.total_penalizaciones = 0
-            c.penalizaciones = []
-        data_final.append(c)
-
-    for g in grupos:
-        p = Prestamo.objects.filter(grupo=g, activo=True).first()
-        g.es_grupo = True
-        g.nombre = g.nombre_grupo
-        if p:
-            total_abono = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-            saldo_cap = float(p.monto_total_pagar) - float(total_abono)
-            multas = Penalizacion.objects.filter(prestamo=p, activa=True)
-            total_m = multas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
-            
-            g.tiene_prestamo_activo = True
-            g.ultimo_prestamo_id = p.id
-            g.saldo_actual = saldo_cap
-            g.total_penalizaciones = float(total_m)
-            g.id_mora_activa = multas.last().id if multas.exists() else None
-            g.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas]
-        else:
-            g.tiene_prestamo_activo = False
-            g.saldo_actual = 0
-            g.total_penalizaciones = 0
-            g.penalizaciones = []
-        data_final.append(g)
-
-    data_final.sort(key=lambda x: x.id, reverse=True)
-    serializer = DirectorioHibridoSerializer(data_final, many=True)
-    return Response(serializer.data)
 @api_view(['GET'])
 def cartera_vencida_hibrida(request):
     from datetime import timedelta
