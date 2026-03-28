@@ -443,33 +443,28 @@ def obtener_proximo_folio(request):
     except Exception as e:
         # Si algo falla, devolvemos un error claro en lugar de un 500 genérico
         return Response({"error": str(e)}, status=500)
+
 from django.db.models import Q, Sum
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import Cliente, Grupo, Prestamo, Penalizacion
-from .serializers import DirectorioHibridoSerializer
+# Asegúrate de importar tus modelos y el serializer
 
 @api_view(['GET'])
 def directorio_hibrido(request):
-    # Obtenemos el parámetro 'search' de la URL
     search = request.query_params.get('search', '').strip()
     
-    # Querysets base
     clientes = Cliente.objects.all()
     grupos = Grupo.objects.all()
     
     if search:
-        # Creamos los filtros base para buscar por NOMBRE
         filtro_clientes = Q(nombre__icontains=search)
         filtro_grupos = Q(nombre_grupo__icontains=search)
         
-        # 🔥 CLAVE: Si la búsqueda es un número, buscamos también por ID exacto
         if search.isdigit():
             search_id = int(search)
             filtro_clientes |= Q(id=search_id)
             filtro_grupos |= Q(id=search_id)
             
-        # Aplicamos los filtros a los objetos
         clientes = clientes.filter(filtro_clientes)
         grupos = grupos.filter(filtro_grupos)
 
@@ -477,22 +472,28 @@ def directorio_hibrido(request):
 
     # --- PROCESAR CLIENTES ---
     for c in clientes:
-        # Buscamos si tiene préstamo activo
-        p = Prestamo.objects.filter(cliente=c, activo=True).first()
-        c.es_grupo = False # Atributo dinámico para el serializer
+        c.es_grupo = False
+        
+        # 1. Buscamos préstamo INDIVIDUAL activo
+        p_ind = Prestamo.objects.filter(cliente=c, activo=True).first()
+        
+        # 2. 🔥 CLAVE: Buscamos si pertenece a un GRUPO con préstamo activo
+        # Filtramos préstamos activos donde el grupo tenga a este cliente en sus integrantes
+        p_grupal = Prestamo.objects.filter(grupo__integrantes=c, activo=True).first()
+        
+        # El cliente está bloqueado si tiene uno individual O uno grupal
+        p = p_ind or p_grupal
         
         if p:
-            # 1. Calculamos el saldo de capital restante
+            # Calculamos saldo del préstamo (sea cual sea el que lo bloquea)
             total_abonado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
             saldo_capital = float(p.monto_total_pagar) - float(total_abonado)
             
-            # 2. Sumamos las penalizaciones (multas) activas
             multas_activas = Penalizacion.objects.filter(prestamo=p, activa=True)
             total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
             
             c.tiene_prestamo_activo = True
             c.ultimo_prestamo_id = p.id
-            # El saldo total es capital + multas
             c.saldo_actual = saldo_capital + float(total_multas) 
             c.total_penalizaciones = float(total_multas)
             c.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas_activas]
@@ -506,19 +507,19 @@ def directorio_hibrido(request):
 
     # --- PROCESAR GRUPOS ---
     for g in grupos:
-        p = Prestamo.objects.filter(grupo=g, activo=True).first()
         g.es_grupo = True
-        g.nombre = g.nombre_grupo # Mapeamos nombre_grupo a nombre para consistencia
+        g.nombre = g.nombre_grupo
+        p_g = Prestamo.objects.filter(grupo=g, activo=True).first()
         
-        if p:
-            total_abonado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-            saldo_capital = float(p.monto_total_pagar) - float(total_abonado)
+        if p_g:
+            total_abonado = p_g.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+            saldo_capital = float(p_g.monto_total_pagar) - float(total_abonado)
             
-            multas_activas = Penalizacion.objects.filter(prestamo=p, activa=True)
+            multas_activas = Penalizacion.objects.filter(prestamo=p_g, activa=True)
             total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
             
             g.tiene_prestamo_activo = True
-            g.ultimo_prestamo_id = p.id
+            g.ultimo_prestamo_id = p_g.id
             g.saldo_actual = saldo_capital + float(total_multas)
             g.total_penalizaciones = float(total_multas)
             g.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas_activas]
@@ -530,13 +531,10 @@ def directorio_hibrido(request):
             
         data_final.append(g)
 
-    # Ordenar por ID para que los más nuevos salgan arriba
     data_final.sort(key=lambda x: x.id, reverse=True)
-    
-    # Serializar y retornar
     serializer = DirectorioHibridoSerializer(data_final, many=True)
     return Response(serializer.data)
-@api_view(['GET'])
+
 def detalle_grupo(request, pk):
     try:
         from django.db.models import Sum
