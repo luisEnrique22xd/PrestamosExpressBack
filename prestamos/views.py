@@ -444,6 +444,61 @@ def obtener_proximo_folio(request):
         # Si algo falla, devolvemos un error claro en lugar de un 500 genérico
         return Response({"error": str(e)}, status=500)
 
+def detalle_grupo(request, pk):
+    try:
+        from django.db.models import Sum
+        grupo = Grupo.objects.get(pk=pk)
+        # Buscamos el préstamo activo del grupo
+        prestamo = Prestamo.objects.filter(grupo=grupo, activo=True).order_by('-id').first()
+        
+        # Estructura "Espejo" para que el Dashboard de Clientes funcione
+        data = {
+            "id": grupo.id,
+            "nombre": grupo.nombre_grupo, # El front busca 'nombre'
+            "direccion": "Crédito Grupal Solidario",
+            "telefono": "N/A",
+            "tipo": "G",
+            "numero_prestamos": Prestamo.objects.filter(grupo=grupo).count(),
+            "tiene_prestamo_activo": prestamo is not None,
+            "ultimo_prestamo_id": prestamo.id if prestamo else None,
+            "saldo_actual": 0,
+            "progreso_pagos": None,
+            "penalizaciones": [],
+            "integrantes_detalle": ClienteSerializer(grupo.integrantes.all(), many=True).data,
+        }
+
+        if prestamo:
+            total_abonado = Abono.objects.filter(prestamo=prestamo).aggregate(Sum('monto'))['monto__sum'] or 0
+            saldo = float(prestamo.monto_total_pagar) - float(total_abonado)
+            
+            data["saldo_actual"] = saldo
+            data["nombre_aval"] = prestamo.nombre_aval
+            data["parentesco_aval"] = prestamo.parentesco_aval
+            data["garantia_descripcion"] = prestamo.garantia_descripcion
+            
+            abonos_data = Abono.objects.filter(prestamo=prestamo).order_by('-id')
+            data["historial_pagos"] = [
+                {
+                    "id": a.id,
+                    "monto": float(a.monto),
+                    "fecha": a.fecha_pago.strftime("%d/%m/%Y"),
+                    "semana": a.semana_numero,
+                } for a in abonos_data
+            ]
+
+            data["progreso_pagos"] = {
+                "monto_capital": float(prestamo.monto_capital),
+                "monto_pagado": float(total_abonado),
+                "modalidad": prestamo.modalidad,
+                "total_cuotas": prestamo.cuotas,
+                "pagado": (float(total_abonado) / float(prestamo.monto_total_pagar)) * 100 if prestamo.monto_total_pagar > 0 else 0
+            }
+            # Opcional: Serializar penalizaciones si las hay
+            # data["penalizaciones"] = PenalizacionSerializer(prestamo.penalizaciones.all(), many=True).data
+
+        return Response(data)
+    except Grupo.DoesNotExist:
+        return Response({"error": "Grupo no encontrado"}, status=404)
 @api_view(['GET'])
 def directorio_hibrido(request):
     search = request.query_params.get('search', '').strip().lower()
@@ -525,63 +580,6 @@ def directorio_hibrido(request):
     data_final.sort(key=lambda x: x.id, reverse=True)
     serializer = DirectorioHibridoSerializer(data_final, many=True)
     return Response(serializer.data)
-
-def detalle_grupo(request, pk):
-    try:
-        from django.db.models import Sum
-        grupo = Grupo.objects.get(pk=pk)
-        # Buscamos el préstamo activo del grupo
-        prestamo = Prestamo.objects.filter(grupo=grupo, activo=True).order_by('-id').first()
-        
-        # Estructura "Espejo" para que el Dashboard de Clientes funcione
-        data = {
-            "id": grupo.id,
-            "nombre": grupo.nombre_grupo, # El front busca 'nombre'
-            "direccion": "Crédito Grupal Solidario",
-            "telefono": "N/A",
-            "tipo": "G",
-            "numero_prestamos": Prestamo.objects.filter(grupo=grupo).count(),
-            "tiene_prestamo_activo": prestamo is not None,
-            "ultimo_prestamo_id": prestamo.id if prestamo else None,
-            "saldo_actual": 0,
-            "progreso_pagos": None,
-            "penalizaciones": [],
-            "integrantes_detalle": ClienteSerializer(grupo.integrantes.all(), many=True).data,
-        }
-
-        if prestamo:
-            total_abonado = Abono.objects.filter(prestamo=prestamo).aggregate(Sum('monto'))['monto__sum'] or 0
-            saldo = float(prestamo.monto_total_pagar) - float(total_abonado)
-            
-            data["saldo_actual"] = saldo
-            data["nombre_aval"] = prestamo.nombre_aval
-            data["parentesco_aval"] = prestamo.parentesco_aval
-            data["garantia_descripcion"] = prestamo.garantia_descripcion
-            
-            abonos_data = Abono.objects.filter(prestamo=prestamo).order_by('-id')
-            data["historial_pagos"] = [
-                {
-                    "id": a.id,
-                    "monto": float(a.monto),
-                    "fecha": a.fecha_pago.strftime("%d/%m/%Y"),
-                    "semana": a.semana_numero,
-                } for a in abonos_data
-            ]
-
-            data["progreso_pagos"] = {
-                "monto_capital": float(prestamo.monto_capital),
-                "monto_pagado": float(total_abonado),
-                "modalidad": prestamo.modalidad,
-                "total_cuotas": prestamo.cuotas,
-                "pagado": (float(total_abonado) / float(prestamo.monto_total_pagar)) * 100 if prestamo.monto_total_pagar > 0 else 0
-            }
-            # Opcional: Serializar penalizaciones si las hay
-            # data["penalizaciones"] = PenalizacionSerializer(prestamo.penalizaciones.all(), many=True).data
-
-        return Response(data)
-    except Grupo.DoesNotExist:
-        return Response({"error": "Grupo no encontrado"}, status=404)
-
 @api_view(['GET'])
 def cartera_vencida_hibrida(request):
     from datetime import timedelta
