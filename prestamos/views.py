@@ -297,24 +297,38 @@ def directorio_hibrido(request):
 
     data_final = []
 
-    # --- PROCESAR CLIENTES (Bloqueo Dulce María) ---
+    # --- PROCESAR CLIENTES ---
     for c in clientes:
         c.es_grupo = False
         p_ind = Prestamo.objects.filter(cliente=c, activo=True).first()
-        # Verificamos si es integrante de un grupo con préstamo activo
+        
+        # 🔥 Detectar si es integrante de un grupo con deuda
+        # Usamos select_related o prefetch para obtener el conteo de integrantes
         p_grupal = Prestamo.objects.filter(grupo__integrantes=c, activo=True).first()
         
+        # Prioridad: Si tiene préstamo individual, manda ese. Si no, el grupal.
         p = p_ind or p_grupal
         
         if p:
             total_abonado_calc = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-            saldo_cap = float(p.monto_total_pagar) - float(total_abonado_calc)
+            saldo_total_prestamo = float(p.monto_total_pagar) - float(total_abonado_calc)
             multas = Penalizacion.objects.filter(prestamo=p, activa=True)
             total_m = multas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
             
+            # Suma de capital pendiente + multas
+            deuda_global_del_folio = saldo_total_prestamo + float(total_m)
+
+            # 🔥 LÓGICA DE DIVISIÓN PARA CLIENTES
+            if p_grupal and not p_ind:
+                # Si el bloqueo viene por grupo, dividimos la deuda entre los miembros
+                num_miembros = p_grupal.grupo.integrantes.count() or 1
+                c.saldo_actual = deuda_global_del_folio / num_miembros
+            else:
+                # Si es préstamo individual, debe el 100%
+                c.saldo_actual = deuda_global_del_folio
+
             c.tiene_prestamo_activo = True
             c.ultimo_prestamo_id = p.id
-            c.saldo_actual = saldo_cap + float(total_m)
             c.total_penalizaciones = float(total_m)
             c.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas]
         else:
@@ -322,6 +336,7 @@ def directorio_hibrido(request):
             c.saldo_actual = 0
             c.total_penalizaciones = 0
             c.penalizaciones = []
+            
         data_final.append(c)
 
     # --- PROCESAR GRUPOS ---
@@ -334,8 +349,10 @@ def directorio_hibrido(request):
             saldo_cap_g = float(p.monto_total_pagar) - float(total_ab)
             multas_g = Penalizacion.objects.filter(prestamo=p, activa=True)
             total_mg = multas_g.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+            
             g.tiene_prestamo_activo = True
             g.ultimo_prestamo_id = p.id
+            # 🔥 El grupo SIEMPRE muestra el total de la deuda
             g.saldo_actual = saldo_cap_g + float(total_mg)
             g.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas_g]
         else:
@@ -350,24 +367,50 @@ def directorio_hibrido(request):
 
 @api_view(['GET'])
 def cartera_vencida_hibrida(request):
+    from datetime import timedelta
     hoy = timezone.now()
+    
+    # 1. Traemos préstamos que el sistema considera activos
     prestamos_activos = Prestamo.objects.filter(activo=True)
     data_cartera = []
+
     for p in prestamos_activos:
+        # --- CHEQUEO DE PENALIZACIONES (Caso Luis Enrique) ---
+        multas_activas = p.penalizaciones.filter(activa=True)
+        tiene_multas = multas_activas.exists()
+        total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+
+        # --- CHEQUEO DE FECHA ---
         ultimo_abono = p.abonos.order_by('-fecha_pago').first()
         fecha_referencia = ultimo_abono.fecha_pago if ultimo_abono else p.fecha_inicio
-        dias = 7 if p.modalidad == 'S' else 15 if p.modalidad == 'Q' else 30
-        fecha_vencimiento = fecha_referencia + timedelta(days=dias)
-        if fecha_vencimiento < hoy:
-            es_g = (p.tipo == 'G')
-            multas_p = p.penalizaciones.filter(activa=True).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+        dias_intervalo = 7 if p.modalidad == 'S' else 15 if p.modalidad == 'Q' else 30
+        fecha_vencimiento = fecha_referencia + timedelta(days=dias_intervalo)
+        
+        vencido_por_fecha = fecha_vencimiento < hoy
+
+        # 🔥 LA CONDICIÓN: Si tiene multas O si ya pasó su fecha de pago
+        if tiene_multas or vencido_por_fecha:
+            es_grupo = (p.tipo == 'G')
+            nombre = p.grupo.nombre_grupo if es_grupo else p.cliente.nombre
+            
+            # Calculamos monto: Cuota de la semana (si venció) + Multas pendientes
+            cuota_esperada = float(p.monto_total_pagar / p.cuotas) if vencido_por_fecha else 0
+            monto_recuperar = cuota_esperada + float(total_multas)
+
             data_cartera.append({
                 "id_prestamo": p.id,
-                "nombre_deudor": p.grupo.nombre_grupo if es_g else p.cliente.nombre,
-                "monto_vencido": (p.monto_total_pagar / p.cuotas) + multas_p,
-                "dias_atraso": (hoy - fecha_vencimiento).days,
-                "telefono": p.telefono_aval if es_g else p.cliente.telefono
+                "nombre_deudor": nombre,
+                "es_grupo": es_grupo,
+                "monto_vencido": round(monto_recuperar, 2),
+                "dias_atraso": (hoy - fecha_vencimiento).days if vencido_por_fecha else 0,
+                "fecha_vencimiento": fecha_vencimiento.strftime("%Y-%m-%d"),
+                "telefono": p.grupo.telefono_aval if es_grupo else p.cliente.telefono,
+                "motivo": "Mora Pendiente" if tiene_multas and not vencido_por_fecha else "Atraso de Cuota"
             })
+
+    # Ordenamos para que los que más deben o más tiempo tienen salgan arriba
+    data_cartera.sort(key=lambda x: x['monto_vencido'], reverse=True)
+    
     return Response(data_cartera)
 
 def detalle_grupo(request, pk):
