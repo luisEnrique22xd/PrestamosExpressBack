@@ -226,28 +226,61 @@ class EstadisticasDinamicasView(APIView):
 
 class CalendarioPagosView(APIView):
     def get(self, request):
-        hoy = get_mexico_date(timezone.now())
-        mes = int(request.query_params.get("mes", hoy.month))
-        anio = int(request.query_params.get("anio", hoy.year))
-        proyecciones = []
-        prestamos = Prestamo.objects.filter(activo=True).select_related("cliente", "grupo")
-        for p in prestamos:
-            fecha_base = get_mexico_date(p.fecha_inicio)
-            for i in range(1, p.cuotas + 1):
-                days = 7*i if p.modalidad=="S" else 15*i if p.modalidad=="Q" else 30*i
-                fecha_pago = fecha_base + timedelta(days=days)
-                if fecha_pago.weekday() == 6: fecha_pago += timedelta(days=1)
-                if fecha_pago.month == mes and fecha_pago.year == anio:
-                    ya_pagado = p.abonos.filter(semana_numero=i).exists()
-                    proyecciones.append({
-                        "id": f"{p.id}-{i}",
-                        "cliente": p.cliente.nombre if p.cliente else p.grupo.nombre_grupo,
-                        "fecha": fecha_pago.strftime("%Y-%m-%d"),
-                        "monto": round(p.monto_total_pagar / p.cuotas, 2),
-                        "estatus": "pagado" if ya_pagado else ("vencido" if fecha_pago < hoy else "pendiente")
-                    })
-        return Response(proyecciones)
+        try:
+            # 1. Configuración de Zona Horaria México
+            mexico_tz = pytz.timezone('America/Mexico_City')
+            hoy = timezone.now().astimezone(mexico_tz).date()
+            
+            # 2. Obtener parámetros de la URL
+            mes = int(request.query_params.get("mes", hoy.month))
+            anio = int(request.query_params.get("anio", hoy.year))
 
+            proyecciones = []
+            # Traemos préstamos activos con sus relaciones
+            prestamos = Prestamo.objects.filter(activo=True).select_related("cliente", "grupo")
+
+            for p in prestamos:
+                # Convertimos la fecha de inicio a la zona horaria de México
+                fecha_base = p.fecha_inicio
+                if hasattr(fecha_base, 'astimezone'):
+                    fecha_base = fecha_base.astimezone(mexico_tz).date()
+
+                for i in range(1, p.cuotas + 1):
+                    # Calcular días según modalidad
+                    if p.modalidad == "S":
+                        fecha_pago = fecha_base + timedelta(days=7 * i)
+                    elif p.modalidad == "Q":
+                        fecha_pago = fecha_base + timedelta(days=15 * i)
+                    else:
+                        fecha_pago = fecha_base + timedelta(days=30 * i)
+
+                    # Si cae en Domingo, se pasa al Lunes (Regla Alexander)
+                    if fecha_pago.weekday() == 6:
+                        fecha_pago += timedelta(days=1)
+
+                    # Solo agregamos si coincide con el mes y año que Alexander está viendo
+                    if fecha_pago.month == mes and fecha_pago.year == anio:
+                        # Verificar si ya existe un abono para esta cuota específica
+                        ya_pagado = p.abonos.filter(semana_numero=i).exists()
+                        
+                        nombre_sujeto = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else "N/A")
+                        id_sujeto = p.cliente.id if p.cliente else (p.grupo.id if p.grupo else 0)
+
+                        proyecciones.append({
+                            "id": f"{p.id}-{i}",
+                            "cliente": nombre_sujeto,
+                            "idCliente": id_sujeto,
+                            "fecha": fecha_pago.strftime("%Y-%m-%d"),
+                            "monto": round(p.monto_total_pagar / p.cuotas, 2),
+                            "estatus": "pagado" if ya_pagado else ("vencido" if fecha_pago < hoy else "pendiente")
+                        })
+            
+            return Response(proyecciones)
+
+        except Exception as e:
+            # Esto nos dirá en los logs de Railway exactamente qué rompió
+            print(f"ERROR EN CALENDARIO: {str(e)}")
+            return Response({"error": "Error interno al generar calendario"}, status=500)
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def condonar_mora(request, pk):
