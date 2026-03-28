@@ -371,51 +371,45 @@ def cartera_vencida_hibrida(request):
     hoy = timezone.now()
     data_cartera = []
 
-    # 1. Traemos préstamos activos
+    # 1. Solo evaluamos préstamos activos
     prestamos_activos = Prestamo.objects.filter(activo=True)
 
     for p in prestamos_activos:
-        # --- VERIFICACIÓN DE PENALIZACIONES ---
-        # Buscamos penalizaciones activas vinculadas a este préstamo
-        multas_activas = p.penalizaciones.filter(activa=True)
-        total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
-        
-        # --- VERIFICACIÓN DE ATRASO CRONOLÓGICO ---
+        # --- CÁLCULO DE VENCIMIENTO REAL ---
         ultimo_abono = p.abonos.order_by('-fecha_pago').first()
         fecha_referencia = ultimo_abono.fecha_pago if ultimo_abono else p.fecha_inicio
         
-        intervalo = 7 if p.modalidad == 'S' else 15 if p.modalidad == 'Q' else 30
-        fecha_vencimiento = fecha_referencia + timedelta(days=intervalo)
-        
-        vencido_por_fecha = fecha_vencimiento < hoy
+        # Intervalo según modalidad
+        dias_intervalo = 7 if p.modalidad == 'S' else 15 if p.modalidad == 'Q' else 30
+        fecha_vencimiento = fecha_referencia + timedelta(days=dias_intervalo)
 
-        # 🔍 DEBUG EN CONSOLA (Mira los logs de Railway)
-        print(f"DEBUG: Revisando Préstamo #{p.id} - Cliente: {p.cliente} - Multas: {total_multas} - Vencido: {vencido_por_fecha}")
-
-        # REGLA: Si debe dinero de multa O si ya pasó su fecha de abono
-        if total_multas > 0 or vencido_por_fecha:
-            es_g = (p.tipo == 'G')
-            nombre = p.grupo.nombre_grupo if es_g else (p.cliente.nombre if p.cliente else "Desconocido")
+        # 🔥 LA REGLA: Solo entra si HOY es después de su fecha de vencimiento
+        if fecha_vencimiento < hoy:
+            es_grupo = (p.tipo == 'G')
+            nombre = p.grupo.nombre_grupo if es_grupo else p.cliente.nombre
             
-            # Calculamos deuda inmediata
-            cuota_semanal = float(p.monto_total_pagar / p.cuotas) if vencido_por_fecha else 0
-            monto_recuperar = cuota_semanal + float(total_multas)
-
+            # Multas asociadas a este préstamo
+            multas_activas = p.penalizaciones.filter(activa=True)
+            total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+            
+            # Deuda = Una cuota del préstamo + multas
+            cuota_base = float(p.monto_total_pagar / p.cuotas)
+            
             data_cartera.append({
                 "id_prestamo": p.id,
                 "nombre_deudor": nombre,
-                "es_grupo": es_g,
-                "monto_vencido": round(monto_recuperar, 2),
-                "dias_atraso": (hoy - fecha_vencimiento).days if vencido_por_fecha else 0,
+                "es_grupo": es_grupo,
+                "monto_vencido": round(cuota_base + float(total_multas), 2),
+                "dias_atraso": (hoy - fecha_vencimiento).days,
                 "fecha_vencimiento": fecha_vencimiento.strftime("%Y-%m-%d"),
-                "telefono": p.grupo.telefono_aval if es_g else (p.cliente.telefono if p.cliente else "N/A"),
-                "motivo": "Multa Pendiente" if total_multas > 0 and not vencido_por_fecha else "Atraso en Pago"
+                "telefono": p.grupo.telefono_aval if es_grupo else p.cliente.telefono,
+                "total_penalizaciones": float(total_multas)
             })
 
-    # Ordenar por monto de mayor a menor
-    data_cartera.sort(key=lambda x: x['monto_vencido'], reverse=True)
-    
+    # Ordenar por los que tienen más días de atraso
+    data_cartera.sort(key=lambda x: x['dias_atraso'], reverse=True)
     return Response(data_cartera)
+
 
 def detalle_grupo(request, pk):
     grupo = Grupo.objects.get(pk=pk)
