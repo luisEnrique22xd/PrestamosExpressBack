@@ -109,7 +109,7 @@ class ClienteListCreateView(generics.ListCreateAPIView):
         cliente = serializer.save()
         registrar_log(self.request.user, "REGISTRO_CLIENTE", f"Se dio de alta al cliente: {cliente.nombre} (ID: {cliente.id})")
 
-class ClienteDetailView(generics.RetrieveAPIView):
+class ClienteDetailView(generics.RetrieveUpdateAPIView):
     queryset = Cliente.objects.all()
     serializer_class = ClienteSerializer
 
