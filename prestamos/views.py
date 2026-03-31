@@ -104,6 +104,7 @@ def estadisticas_globales(request):
 class ClienteListCreateView(generics.ListCreateAPIView):
     queryset = Cliente.objects.all()
     serializer_class = ClienteSerializer
+    read_only_fields = ['nombre', 'curp', 'fecha_nacimiento']
     
     def perform_create(self, serializer):
         cliente = serializer.save()
