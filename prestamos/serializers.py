@@ -219,6 +219,8 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     nombre = serializers.SerializerMethodField()
     es_grupo = serializers.BooleanField()
+    curp = serializers.CharField(required=False, allow_null=True)
+    fecha_nacimiento = serializers.DateField(required=False, allow_null=True)
     # Los declaramos solo como MethodField para que usen tus funciones de abajo
     saldo_actual = serializers.SerializerMethodField()
     total_penalizaciones = serializers.SerializerMethodField()
