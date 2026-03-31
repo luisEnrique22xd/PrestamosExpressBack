@@ -272,7 +272,8 @@ class CalendarioPagosView(APIView):
                             "idCliente": id_sujeto,
                             "fecha": fecha_pago.strftime("%Y-%m-%d"),
                             "monto": round(p.monto_total_pagar / p.cuotas, 2),
-                            "estatus": "pagado" if ya_pagado else ("vencido" if fecha_pago < hoy else "pendiente")
+                            "estatus": "pagado" if ya_pagado else ("vencido" if fecha_pago < hoy else "pendiente"),
+                            "tel": p.grupo.telefono_aval if p.grupo else (p.cliente.telefono if p.cliente else "")
                         })
             
             return Response(proyecciones)
