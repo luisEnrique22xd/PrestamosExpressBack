@@ -123,12 +123,23 @@ class Prestamo(models.Model):
 
 
 class Abono(models.Model):
+    MODALIDAD_CHOICES = [
+        ('E', 'Efectivo'),
+        ('D', 'Depósito'),
+        ('T', 'Transferencia'),
+    ]
     prestamo = models.ForeignKey(Prestamo, on_delete=models.CASCADE, related_name='abonos')
     monto = models.DecimalField(max_digits=10, decimal_places=2)
     fecha_pago = models.DateField(auto_now_add=True)
     semana_numero = models.IntegerField() # Para saber si es la Sem 1, Sem 2, etc.
     fecha_pago = models.DateField(auto_now_add=True)
     hora_pago = models.TimeField(auto_now_add=True)
+    modalidad = models.CharField(
+        max_length=1, 
+        choices=MODALIDAD_CHOICES, 
+        default='E'
+    )
+    
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs) # Primero guardamos el abono
         
