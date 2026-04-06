@@ -138,7 +138,7 @@ class Abono(models.Model):
         max_length=1, 
         choices=MODALIDAD_CHOICES, 
         default='E'
-    )
+    )# para registrar si fue en efectivo, depósito o transferencia
     
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs) # Primero guardamos el abono
