@@ -351,7 +351,7 @@ def directorio_hibrido(request):
             total_m = multas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
             
             # Suma de capital pendiente + multas
-            deuda_global_del_folio = saldo_total_prestamo + float(total_m)
+            deuda_global_del_folio = saldo_total_prestamo 
 
             # 🔥 LÓGICA DE DIVISIÓN PARA CLIENTES
             if p_grupal and not p_ind:
@@ -388,7 +388,7 @@ def directorio_hibrido(request):
             g.tiene_prestamo_activo = True
             g.ultimo_prestamo_id = p.id
             # 🔥 El grupo SIEMPRE muestra el total de la deuda
-            g.saldo_actual = saldo_cap_g + float(total_mg)
+            g.saldo_actual = saldo_cap_g
             g.penalizaciones = [{"monto_penalizado": float(m.monto_penalizado), "activa": m.activa} for m in multas_g]
         else:
             g.tiene_prestamo_activo = False
