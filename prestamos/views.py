@@ -439,19 +439,27 @@ def cartera_vencida_hibrida(request):
                 total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
                 
                 # --- CÁLCULO SEGURO DE CUOTA ---
-                monto_a_pagar = p.monto_total_pagar or 0
-                num_cuotas = p.cuotas if p.cuotas and p.cuotas > 0 else 1 # Evita división por cero
-                cuota_base = float(monto_a_pagar) / num_cuotas
+               # --- CÁLCULO SEGURO Y JUSTO DE CUOTA ---
+                total_m_float = float(total_multas)
+                monto_final_esperado = float(p.monto_total_pagar or 0)
+                num_cuotas = p.cuotas if p.cuotas and p.cuotas > 0 else 1
+                
+                # Intentamos obtener la cuota base "limpia"
+                # Si el total es 3690 y tiene 90 de multas, la base es (3690-90)/8 = 450
+                cuota_base = (monto_final_esperado - total_m_float) / num_cuotas
+                
+                # Monto vencido = Cuota base (450) + Todas las multas activas (90)
+                monto_vencido_final = round(cuota_base + total_m_float, 2)
                 
                 data_cartera.append({
                     "id_prestamo": p.id,
                     "nombre_deudor": nombre,
                     "es_grupo": es_grupo,
-                    "monto_vencido": round(cuota_base + float(total_multas), 2),
+                    "monto_vencido": monto_vencido_final, # Aquí saldrán los $540.00
                     "dias_atraso": (hoy - fecha_vencimiento).days,
                     "fecha_vencimiento": fecha_vencimiento.strftime("%Y-%m-%d"),
                     "telefono": p.grupo.telefono_aval if es_grupo and p.grupo else (p.cliente.telefono if p.cliente else ""),
-                    "total_penalizaciones": float(total_multas)
+                    "total_penalizaciones": total_m_float
                 })
         except Exception as e:
             print(f"Error procesando préstamo {p.id}: {str(e)}")
