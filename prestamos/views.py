@@ -21,25 +21,40 @@ from .serializers import ClienteSerializer, DirectorioHibridoSerializer, Prestam
 
 @api_view(['GET'])
 def estadisticas_globales(request):
+    # 1. Configuración de Zona Horaria (Evita el desfase de Railway/UTC)
     mexico_tz = pytz.timezone('America/Mexico_City')
-    
-    # 2. Obtener el "Hoy" real en México
-    # .astimezone(mexico_tz) convierte la hora UTC actual a la de Tlaxcala
-    hoy_mexico = timezone.now().astimezone(mexico_tz).date()
+    ahora_mexico = timezone.now().astimezone(mexico_tz)
+    hoy_mexico = ahora_mexico.date()
 
-    cobrado_hoy = Abono.objects.filter(fecha_pago=hoy_mexico).aggregate(Sum('monto'))['monto__sum'] or 0.0
+    # 2. Cobranza del día (Filtrado por la fecha real en México)
+    cobrado_hoy = Abono.objects.filter(
+        fecha_pago=hoy_mexico
+    ).aggregate(Sum('monto'))['monto__sum'] or 0.0
+
+    # 3. Métricas históricas y acumuladas
     total_recuperado_hist = Abono.objects.aggregate(Sum('monto'))['monto__sum'] or 0.0
 
-    total_moras_pendientes = Penalizacion.objects.filter(activa=True).aggregate(
-        Sum('monto_penalizado')
-    )['monto_penalizado__sum'] or 0.0
+    total_moras_pendientes = Penalizacion.objects.filter(
+        activa=True
+    ).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0.0
 
     prestamos_activos_count = Prestamo.objects.filter(activo=True).count()
-    total_prestado = Prestamo.objects.filter(activo=True).aggregate(Sum('monto_capital'))['monto_capital__sum'] or 0
-    total_esperado = Prestamo.objects.filter(activo=True).aggregate(Sum('monto_total_pagar'))['monto_total_pagar__sum'] or 0
+    
+    total_prestado = Prestamo.objects.filter(
+        activo=True
+    ).aggregate(Sum('monto_capital'))['monto_capital__sum'] or 0
+    
+    total_esperado = Prestamo.objects.filter(
+        activo=True
+    ).aggregate(Sum('monto_total_pagar'))['monto_total_pagar__sum'] or 0
+    
     total_interes_pactado = total_esperado - total_prestado
-    total_moras_historicas = Penalizacion.objects.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+    
+    total_moras_historicas = Penalizacion.objects.aggregate(
+        Sum('monto_penalizado')
+    )['monto_penalizado__sum'] or 0
 
+    # 4. Clasificación por Rangos de Inversión
     definicion_rangos = [
         {"label": "$500-1500", "min": 500, "max": 1500},
         {"label": "$1501-3000", "min": 1501, "max": 3000},
@@ -48,8 +63,13 @@ def estadisticas_globales(request):
         {"label": "$7501-10000", "min": 7501, "max": 10000},
     ]
 
-    prestamos = Prestamo.objects.annotate(
-        total_abonado_calc=Coalesce(Sum('abonos__monto'), Decimal('0.00'), output_field=DecimalField())
+    # Traemos préstamos con sus abonos sumados para calcular el saldo en calle real
+    prestamos = Prestamo.objects.filter(activo=True).annotate(
+        total_abonado_calc=Coalesce(
+            Sum('abonos__monto'), 
+            Decimal('0.00'), 
+            output_field=DecimalField()
+        )
     )
 
     rangos_data = []
@@ -65,6 +85,7 @@ def estadisticas_globales(request):
         })
 
     for p in prestamos:
+        # Saldo = Lo que debe pagar - Lo que ya abonó
         saldo = round(p.monto_total_pagar - p.total_abonado_calc, 2)
         if saldo > Decimal("0.01"):
             capital_en_calle += saldo
@@ -74,21 +95,36 @@ def estadisticas_globales(request):
                     r["total"] += saldo
                     break
 
+    # Formatear montos de los rangos para el frontend
     for r in rangos_data:
         r["total"] = f"${r['total']:,.2f}"
         del r["min"]
         del r["max"]
 
-    hace_7_dias = hoy - timedelta(days=6)
-    abonos_7 = Abono.objects.filter(fecha_pago__gte=hace_7_dias).annotate(dia=TruncDay('fecha_pago')).values('dia').annotate(total=Sum('monto')).order_by('dia')
+    # 5. Gráfica de Rendimiento Semanal (Últimos 7 días)
+    hace_7_dias = hoy_mexico - timedelta(days=6)
+    abonos_7 = Abono.objects.filter(
+        fecha_pago__gte=hace_7_dias,
+        fecha_pago__lte=hoy_mexico
+    ).annotate(
+        dia=TruncDay('fecha_pago')
+    ).values('dia').annotate(
+        total=Sum('monto')
+    ).order_by('dia')
 
     dias_nombres = {0: 'Lun', 1: 'Mar', 2: 'Mie', 3: 'Jue', 4: 'Vie', 5: 'Sab', 6: 'Dom'}
     grafica_semanal = []
+    
     for i in range(7):
         f_iter = hace_7_dias + timedelta(days=i)
+        # Buscamos si hay abonos para ese día específico en la consulta
         monto_dia = next((item['total'] for item in abonos_7 if item['dia'] == f_iter), 0)
-        grafica_semanal.append({"dia": dias_nombres[f_iter.weekday()], "monto": float(monto_dia)})
+        grafica_semanal.append({
+            "dia": dias_nombres[f_iter.weekday()], 
+            "monto": float(monto_dia)
+        })
 
+    # 6. Respuesta final
     return Response({
         "prestamos_activos": prestamos_activos_count,
         "capital_en_calle": f"${capital_en_calle:,.2f}",
@@ -98,9 +134,8 @@ def estadisticas_globales(request):
         "total_penalizaciones": total_moras_historicas,
         "grafica_semanal": grafica_semanal,
         "cobrado_hoy": f"${cobrado_hoy:,.2f}",
-        "total_moras_pendientes": f"${total_moras_pendientes:,.2f}"
+        "total_moras_pendientes": total_moras_pendientes
     })
-
 
 # ==============================
 # CLIENTES
