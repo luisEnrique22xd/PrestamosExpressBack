@@ -21,8 +21,13 @@ from .serializers import ClienteSerializer, DirectorioHibridoSerializer, Prestam
 
 @api_view(['GET'])
 def estadisticas_globales(request):
-    hoy = timezone.now().date()
-    cobrado_hoy = Abono.objects.filter(fecha_pago=hoy).aggregate(Sum('monto'))['monto__sum'] or 0.0
+    mexico_tz = pytz.timezone('America/Mexico_City')
+    
+    # 2. Obtener el "Hoy" real en México
+    # .astimezone(mexico_tz) convierte la hora UTC actual a la de Tlaxcala
+    hoy_mexico = timezone.now().astimezone(mexico_tz).date()
+
+    cobrado_hoy = Abono.objects.filter(fecha_pago=hoy_mexico).aggregate(Sum('monto'))['monto__sum'] or 0.0
     total_recuperado_hist = Abono.objects.aggregate(Sum('monto'))['monto__sum'] or 0.0
 
     total_moras_pendientes = Penalizacion.objects.filter(activa=True).aggregate(
