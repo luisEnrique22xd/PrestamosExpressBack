@@ -225,6 +225,11 @@ class RegistrarAbonoView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         prestamo = serializer.validated_data['prestamo']
+        modalidad_sigla = request.data.get('modalidad', 'E') # 'E' por defecto
+        
+        # Mapeo para que en el ticket/response salga el nombre completo
+        nombres_pago = {'E': 'Efectivo', 'D': 'Depósito', 'T': 'Transferencia'}
+        modalidad_texto = nombres_pago.get(modalidad_sigla, 'Efectivo')
 
         total_abonado_antes = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
         saldo_cap_antes = prestamo.monto_total_pagar - total_abonado_antes
@@ -242,11 +247,12 @@ class RegistrarAbonoView(generics.CreateAPIView):
         registrar_log(
             request.user, 
             "REGISTRO_PAGO", 
-            f"Pago de ${abono.monto} registrado para {sujeto} (Cuota #{abono.semana_numero})"
+            f"Pago de ${abono.monto} registrado para {sujeto} (Cuota #{abono.semana_numero}) via {modalidad_texto}"
         )
         return Response({
             "id": abono.id,
             "monto": float(abono.monto),
+            "modalidad": modalidad_texto,
             "penalizaciones_pagadas": float(monto_multa_pagado),
             "saldo_anterior": saldo_anterior_total,
             "nuevo_saldo": nuevo_saldo_final,
