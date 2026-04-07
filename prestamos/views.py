@@ -31,6 +31,19 @@ def estadisticas_globales(request):
         fecha_pago=hoy_mexico
     ).aggregate(Sum('monto'))['monto__sum'] or 0.0
 
+    desglose_hoy = Abono.objects.filter(fecha_pago=hoy_mexico).values('modalidad').annotate(
+        total=Sum('monto')
+    )
+    # Mapeo de siglas a nombres reales
+    nombres_modalidad = {'E': 'Efectivo', 'D': 'Depósito', 'T': 'Transferencia'}
+    
+    # Formateamos para el frontend
+    metodos_pago_data = []
+    for item in desglose_hoy:
+        metodos_pago_data.append({
+            "label": nombres_modalidad.get(item['modalidad'], 'Otro'),
+            "monto": float(item['total'] or 0)
+        })
     # 3. Métricas históricas y acumuladas
     total_recuperado_hist = Abono.objects.aggregate(Sum('monto'))['monto__sum'] or 0.0
 
@@ -126,6 +139,8 @@ def estadisticas_globales(request):
 
     # 6. Respuesta final
     return Response({
+        "cobrado_hoy": f"${cobrado_hoy:,.2f}",
+        "metodos_pago": metodos_pago_data,
         "prestamos_activos": prestamos_activos_count,
         "capital_en_calle": f"${capital_en_calle:,.2f}",
         "total_recuperado": f"${total_recuperado_hist:,.2f}",
