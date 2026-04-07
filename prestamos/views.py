@@ -392,6 +392,7 @@ def directorio_hibrido(request):
     clientes = Cliente.objects.all()
     grupos = Grupo.objects.all()
     
+    
     if search:
         filtro_clientes = Q(nombre__icontains=search)
         filtro_grupos = Q(nombre_grupo__icontains=search)
@@ -421,7 +422,8 @@ def directorio_hibrido(request):
             saldo_total_prestamo = float(p.monto_total_pagar) - float(total_abonado_calc)
             multas = Penalizacion.objects.filter(prestamo=p, activa=True)
             total_m = multas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
-            
+            c.monto_total_pagar = float(p.monto_total_pagar) # Valor total original
+            c.cuotas = p.cuotas
             # Suma de capital pendiente + multas
             deuda_global_del_folio = saldo_total_prestamo 
 
@@ -456,7 +458,8 @@ def directorio_hibrido(request):
             saldo_cap_g = float(p.monto_total_pagar) - float(total_ab)
             multas_g = Penalizacion.objects.filter(prestamo=p, activa=True)
             total_mg = multas_g.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
-            
+            g.monto_total_pagar = float(p.monto_total_pagar)
+            g.cuotas = p.cuotas
             g.tiene_prestamo_activo = True
             g.ultimo_prestamo_id = p.id
             # 🔥 El grupo SIEMPRE muestra el total de la deuda

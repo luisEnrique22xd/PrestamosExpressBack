@@ -216,6 +216,8 @@ class AbonoSerializer(serializers.ModelSerializer):
 
 # 4. SERIALIZER HÍBRIDO (Para el Buscador de Pagos)
 class DirectorioHibridoSerializer(serializers.Serializer):
+    monto_total_pagar = serializers.FloatField(required=False)
+    cuotas = serializers.IntegerField(required=False)
     id = serializers.IntegerField()
     nombre = serializers.SerializerMethodField()
     es_grupo = serializers.BooleanField()
