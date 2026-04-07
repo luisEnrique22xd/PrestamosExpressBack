@@ -225,12 +225,18 @@ class RegistrarAbonoView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         prestamo = serializer.validated_data['prestamo']
-        modalidad_sigla = request.data.get('modalidad', 'E') # 'E' por defecto
+        modalidad_raw = request.data.get('modalidad', 'E')
         
-        # Mapeo para que en el ticket/response salga el nombre completo
-        nombres_pago = {'E': 'Efectivo', 'D': 'Depósito', 'T': 'Transferencia'}
-        modalidad_texto = nombres_pago.get(modalidad_sigla, 'Efectivo')
-
+        # Mapeo bidireccional para no fallar nunca
+        nombres_pago = {
+            'E': 'Efectivo', 'Efectivo': 'Efectivo',
+            'D': 'Depósito', 'Depósito': 'Depósito', 'Deposito': 'Depósito',
+            'T': 'Transferencia', 'Transferencia': 'Transferencia'
+        }
+        # Obtenemos el nombre bonito para el log y la respuesta
+        modalidad_texto = nombres_pago.get(modalidad_raw, 'Efectivo')
+        # Obtenemos la sigla para guardar en la base de datos si el serializer no lo hizo ya
+        modalidad_db = 'E' if modalidad_texto == 'Efectivo' else 'T' if modalidad_texto == 'Transferencia' else 'D'
         total_abonado_antes = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
         saldo_cap_antes = prestamo.monto_total_pagar - total_abonado_antes
         m_activas = prestamo.penalizaciones.filter(activa=True)
@@ -241,6 +247,7 @@ class RegistrarAbonoView(generics.CreateAPIView):
             m_activas.update(activa=False)
 
         self.perform_create(serializer)
+        serializer.save(modalidad=modalidad_db)
         abono = serializer.instance
         nuevo_saldo_final = float(saldo_cap_antes) - float(abono.monto) - float(monto_multa_pagado)
         sujeto = prestamo.grupo.nombre_grupo if prestamo.tipo == 'G' and prestamo.grupo else prestamo.cliente.nombre
