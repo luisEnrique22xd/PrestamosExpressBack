@@ -139,7 +139,7 @@ def estadisticas_globales(request):
 
     # 6. Respuesta final
     return Response({
-        "cobrado_hoy": f"${cobrado_hoy:,.2f}",
+        
         "metodos_pago": metodos_pago_data,
         "prestamos_activos": prestamos_activos_count,
         "capital_en_calle": f"${capital_en_calle:,.2f}",
