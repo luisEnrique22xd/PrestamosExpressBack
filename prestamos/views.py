@@ -182,7 +182,7 @@ class RegistrarAbonoView(generics.CreateAPIView):
 
         self.perform_create(serializer)
         abono = serializer.instance
-        nuevo_saldo_final = float(saldo_cap_antes) - float(abono.monto)
+        nuevo_saldo_final = float(saldo_cap_antes) - float(abono.monto) - float(monto_multa_pagado)
         sujeto = prestamo.grupo.nombre_grupo if prestamo.tipo == 'G' and prestamo.grupo else prestamo.cliente.nombre
         registrar_log(
             request.user, 
