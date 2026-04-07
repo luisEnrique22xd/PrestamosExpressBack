@@ -33,7 +33,7 @@ def estadisticas_globales(request):
 
     desglose_hoy = Abono.objects.filter(fecha_pago=hoy_mexico).values('modalidad').annotate(
         total=Sum('monto')
-    )
+    ).order_by('modalidad')
     # Mapeo de siglas a nombres reales
     nombres_modalidad = {'E': 'Efectivo', 'D': 'Depósito', 'T': 'Transferencia'}
     
