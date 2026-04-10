@@ -361,15 +361,38 @@ def condonar_mora(request, pk):
     try:
         penalizacion = Penalizacion.objects.get(pk=pk)
         motivo = request.data.get('motivo')
-        if not motivo or len(motivo) < 10: return Response({"error": "Motivo inválido"}, status=400)
+        
+        if not motivo or len(motivo) < 10: 
+            return Response({"error": "Motivo inválido (mínimo 10 caracteres)"}, status=400)
+        
         if penalizacion.activa:
+            # 1. Obtener el préstamo asociado
+            prestamo = penalizacion.prestamo
+            
+            # 2. RESTAR el monto de la mora del total a pagar del préstamo
+            # Esto es lo que faltaba para que el abono baje a $600
+            prestamo.monto_total_pagar -= penalizacion.monto_penalizado
+            prestamo.save()
+            
+            # 3. Desactivar la penalización
             penalizacion.activa = False
             penalizacion.motivo_condonacion = motivo
             penalizacion.save()
-            registrar_log(request.user, "CONDONACION_MORA", f"Perdonados ${penalizacion.monto_penalizado}")
-            return Response({"message": "Condonada"})
-        return Response({"message": "Ya estaba condonada"}, status=400)
-    except: return Response({"status": 500})
+            
+            registrar_log(
+                request.user, 
+                "CONDONACION_MORA", 
+                f"Perdonados ${penalizacion.monto_penalizado} al préstamo #{prestamo.id}. Nuevo total: ${prestamo.monto_total_pagar}"
+            )
+            
+            return Response({
+                "message": "Condonada con éxito y saldo del préstamo actualizado",
+                "nuevo_total_prestamo": prestamo.monto_total_pagar
+            })
+            
+        return Response({"message": "Esta penalización ya no estaba activa"}, status=400)
+    except Exception as e: 
+        return Response({"error": str(e)}, status=500)
 
 @api_view(['GET', 'POST'])
 def obtener_proximo_folio(request):
