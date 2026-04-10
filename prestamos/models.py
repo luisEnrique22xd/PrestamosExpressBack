@@ -81,6 +81,8 @@ class Prestamo(models.Model):
         # 1. Verificar si el cliente ya tiene UN préstamo individual activo
         if self.cliente:
             prestamo_activo = Prestamo.objects.filter(cliente=self.cliente, activo=True).exists()
+            if self.pk:
+                prestamo_activo = Prestamo.objects.filter(cliente=self.cliente, activo=True).exclude(pk=self.pk).exists()
             if prestamo_activo:
                 raise ValidationError(f"El cliente {self.cliente.nombre} ya tiene un préstamo activo. Debe liquidarlo antes de solicitar otro.")
 
