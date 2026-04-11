@@ -15,6 +15,46 @@ from .models import ContadorFolio, Prestamo, Cliente, Abono, Penalizacion, regis
 from .serializers import ClienteSerializer, DirectorioHibridoSerializer, PrestamoSerializer, AbonoSerializer
 
 
+from django.http import JsonResponse
+from django.db.models import Sum
+from rest_framework.decorators import api_view # Opcional, pero recomendado
+# Asegúrate de importar tus modelos y serializers
+
+def detalle_grupo(request, pk):
+    try:
+        # 1. Buscamos el grupo
+        grupo = Grupo.objects.get(pk=pk)
+        
+        # 2. Buscamos préstamo activo
+        prestamo = Prestamo.objects.filter(grupo=grupo, activo=True).first()
+        
+        # 3. Serializamos integrantes
+        integrantes_data = ClienteSerializer(grupo.integrantes.all(), many=True).data
+        
+        data = {
+            "id": grupo.id, 
+            "nombre": grupo.nombre_grupo, 
+            "tipo": "G", 
+            "tiene_prestamo_activo": prestamo is not None, 
+            "integrantes_detalle": integrantes_data
+        }
+        
+        if prestamo:
+            # 4. Cálculo de saldo (Sum debe estar importado de django.db.models)
+            tot = Abono.objects.filter(prestamo=prestamo).aggregate(Sum('monto'))['monto__sum'] or 0
+            data["saldo_actual"] = float(prestamo.monto_total_pagar) - float(tot)
+            data["nombre_aval"] = prestamo.nombre_aval
+            data["monto_total_pagar"] = float(prestamo.monto_total_pagar)
+        
+        # 🚨 LA CLAVE: Usa JsonResponse en lugar de Response
+        return JsonResponse(data)
+
+    except Grupo.DoesNotExist:
+        return JsonResponse({"error": "Grupo no encontrado"}, status=404)
+    except Exception as e:
+        # Esto te ayudará a ver otros errores en los logs
+        return JsonResponse({"error": str(e)}, status=500)
+    
 # ==============================
 # ESTADÍSTICAS GLOBALES
 # ==============================
@@ -568,12 +608,3 @@ def cartera_vencida_hibrida(request):
     return Response(data_cartera)
 
 
-def detalle_grupo(request, pk):
-    grupo = Grupo.objects.get(pk=pk)
-    prestamo = Prestamo.objects.filter(grupo=grupo, activo=True).first()
-    data = {"id": grupo.id, "nombre": grupo.nombre_grupo, "tipo": "G", "tiene_prestamo_activo": prestamo is not None, "integrantes_detalle": ClienteSerializer(grupo.integrantes.all(), many=True).data}
-    if prestamo:
-        tot = Abono.objects.filter(prestamo=prestamo).aggregate(Sum('monto'))['monto__sum'] or 0
-        data["saldo_actual"] = float(prestamo.monto_total_pagar) - float(tot)
-        data["nombre_aval"] = prestamo.nombre_aval
-    return Response(data)
