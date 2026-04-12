@@ -344,6 +344,7 @@ class CalendarioPagosView(APIView):
             mexico_tz = pytz.timezone('America/Mexico_City')
             hoy = timezone.now().astimezone(mexico_tz).date()
             
+            
             # 2. Obtener parámetros de la URL
             mes = int(request.query_params.get("mes", hoy.month))
             anio = int(request.query_params.get("anio", hoy.year))
@@ -378,6 +379,10 @@ class CalendarioPagosView(APIView):
                         
                         nombre_sujeto = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else "N/A")
                         id_sujeto = p.cliente.id if p.cliente else (p.grupo.id if p.grupo else 0)
+                        if p.grupo:
+                            telefono_contacto = getattr(p, 'telefono_aval', "") # Buscamos en el préstamo
+                        else:
+                            telefono_contacto = p.cliente.telefono if p.cliente else ""
 
                         proyecciones.append({
                             "id": f"{p.id}-{i}",
@@ -386,7 +391,7 @@ class CalendarioPagosView(APIView):
                             "fecha": fecha_pago.strftime("%Y-%m-%d"),
                             "monto": round(p.monto_total_pagar / p.cuotas, 2),
                             "estatus": "pagado" if ya_pagado else ("vencido" if fecha_pago < hoy else "pendiente"),
-                            "tel": p.grupo.telefono_aval if p.grupo else (p.cliente.telefono if p.cliente else "")
+                            "tel": telefono_contacto
                         })
             
             return Response(proyecciones)
