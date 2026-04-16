@@ -583,7 +583,7 @@ def cartera_vencida_hibrida(request):
                     print(f"DEBUG JAVIER -> Pagado: {pagado}")
 
                 # Si la fecha ya pasó, verificamos si está pagada
-                if fv < hoy:
+                if fv <= hoy:
                     pagado = p.abonos.filter(semana_numero=i).exists()
                     if not pagado:
                         atraso_detectado = True
