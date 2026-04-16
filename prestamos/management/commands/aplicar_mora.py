@@ -70,7 +70,7 @@ class Command(BaseCommand):
                 fecha_pago += timedelta(days=1)
 
             # Si la fecha de pago ya pasó y no hay abono registrado
-            if fecha_pago <= hoy:
+            if fecha_pago < hoy:
                 pagado = p.abonos.filter(semana_numero=i).exists()
                 if not pagado:
                     return True 
