@@ -549,18 +549,15 @@ from rest_framework.response import Response
 from django.utils import timezone
 from datetime import timedelta
 from .models import Prestamo, Penalizacion
+import pytz
 
 @api_view(['GET'])
 def cartera_vencida_hibrida(request):
-    """
-    Vista que escanea préstamos activos para detectar cuotas vencidas 
-    o multas pendientes, permitiendo gestión individual y grupal.
-    """
-    # 1. Configuración de tiempo local (México)
-    hoy = timezone.localtime(timezone.now()).date()
+    # 1. Anclamos la vista a la hora de México
+    mexico_tz = pytz.timezone('America/Mexico_City')
+    hoy = timezone.now().astimezone(mexico_tz).date()
     data_cartera = []
 
-    # 2. Obtenemos préstamos activos con relaciones precargadas para velocidad
     prestamos_activos = Prestamo.objects.filter(activo=True).select_related(
         'cliente', 'grupo'
     ).prefetch_related('abonos', 'penalizaciones')
@@ -570,94 +567,54 @@ def cartera_vencida_hibrida(request):
             atraso_detectado = False
             fecha_vencimiento_antigua = None
             
-            # Normalizar fecha de inicio del préstamo
-            fecha_base = p.fecha_inicio
-            if hasattr(fecha_base, 'date'):
-                fecha_base = fecha_base.date()
+            # Normalizamos la fecha de inicio a México (crucial por el server en Indonesia)
+            fecha_base = p.fecha_inicio.astimezone(mexico_tz).date()
 
-            # --- ESCANEO DE CUOTAS ---
             for i in range(1, p.cuotas + 1):
-                # Calcular fecha teórica de la cuota según modalidad
-                if p.modalidad in ["Semanal", "S"]:
+                if p.modalidad in ["Semanal", "S", "Semanal "]:
                     fv = fecha_base + timedelta(days=7 * i)
-                elif p.modalidad in ["Quincenal", "Q"]:
+                elif p.modalidad in ["Quincenal", "Q", "Quincenal "]:
                     fv = fecha_base + timedelta(days=15 * i)
-                elif p.modalidad in ["Mensual", "M"]:
-                    fv = fecha_base + timedelta(days=30 * i)
                 else:
-                    fv = fecha_base + timedelta(days=7 * i) # Default semanal
+                    fv = fecha_base + timedelta(days=30 * i)
 
-                # Aplicar Regla Alexander: Domingos se cobran en Lunes
-                if fv.weekday() == 6: 
-                    fv += timedelta(days=1)
+                if fv.weekday() == 6: fv += timedelta(days=1)
 
-                # Comparación estricta (<=) para que el día de hoy ya cuente como vencido
-                if fv < hoy:
+                # Usamos <= para que Alexander vea el aviso desde el primer minuto del vencimiento
+                if fv <= hoy:
                     pagado = p.abonos.filter(semana_numero=i).exists()
                     if not pagado:
                         atraso_detectado = True
                         fecha_vencimiento_antigua = fv
-                        break
+                        break 
             
-            # --- CÁLCULO DE MULTAS ACTIVAS ---
             multas_activas = p.penalizaciones.filter(activa=True)
-            total_multas = multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
-            total_m_float = float(total_multas)
+            total_multas = float(multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0)
 
-            # --- SI DEBE CUOTA O TIENE MULTAS, ENTRA A CARTERA ---
-            if atraso_detectado or total_m_float > 0:
+            if atraso_detectado or total_multas > 0:
                 es_grupo = (p.tipo == 'G')
+                nombre = p.grupo.nombre_grupo if (es_grupo and p.grupo) else (p.cliente.nombre if p.cliente else "N/A")
                 
-                # Nombre del sujeto (Híbrido)
-                if es_grupo:
-                    nombre = p.grupo.nombre_grupo if p.grupo else "Grupo sin nombre"
-                else:
-                    nombre = p.cliente.nombre if p.cliente else "Cliente sin nombre"
+                monto_final = float(p.monto_total_pagar or 0)
+                cuota_base = (monto_final - total_multas) / (p.cuotas if p.cuotas > 0 else 1)
+                monto_vencido = round((cuota_base if atraso_detectado else 0) + total_multas, 2)
                 
-                # --- CÁLCULO SEGURO DE LA CUOTA UNITARIA ---
-                monto_final_esperado = float(p.monto_total_pagar or 0)
-                num_cuotas = p.cuotas if p.cuotas > 0 else 1
-                
-                # Obtenemos la cuota base restando multas del total para no duplicar
-                cuota_base = (monto_final_esperado - total_m_float) / num_cuotas
-                
-                # Monto vencido final = (Cuota actual si está atrasada) + Todas las multas
-                monto_vencido_final = round((cuota_base if atraso_detectado else 0) + total_m_float, 2)
-                
-                # Gestión de etiquetas y días de atraso
-                if atraso_detectado:
-                    dias = (hoy - fecha_vencimiento_antigua).days
-                    label_vencimiento = fecha_vencimiento_antigua.strftime("%Y-%m-%d")
-                else:
-                    # Si solo debe multas pero va al día con sus cuotas
-                    dias = 0
-                    label_vencimiento = "Solo Multas"
-
-                # Teléfono (Híbrido: Aval para grupos, personal para clientes)
-                if es_grupo:
-                    telefono = getattr(p, 'telefono_aval', "")
-                else:
-                    telefono = p.cliente.telefono if p.cliente else ""
+                # Días de atraso reales (Hoy 15 - Vencimiento 14 = 1 día)
+                dias = (hoy - fecha_vencimiento_antigua).days if fecha_vencimiento_antigua else 0
 
                 data_cartera.append({
                     "id_prestamo": p.id,
-                    "folio_pagare": getattr(p, 'folio_pagare', p.id),
                     "nombre_deudor": nombre,
                     "es_grupo": es_grupo,
-                    "monto_vencido": monto_vencido_final,
+                    "monto_vencido": monto_vencido,
                     "dias_atraso": dias,
-                    "fecha_vencimiento": label_vencimiento,
-                    "telefono": telefono,
-                    "total_penalizaciones": total_m_float,
-                    "solo_multa": not atraso_detectado
+                    "fecha_vencimiento": fecha_vencimiento_antigua.strftime("%Y-%m-%d") if fecha_vencimiento_antigua else "Solo Multas",
+                    "telefono": p.telefono_aval if es_grupo else (p.cliente.telefono if p.cliente else ""),
+                    "total_penalizaciones": total_multas
                 })
 
         except Exception as e:
-            # Log de error para Railway Console
-            print(f"ERROR PROCESANDO CARTERA (Préstamo {p.id}): {str(e)}")
-            continue
+            print(f"Error en préstamo {p.id}: {e}")
 
-    # 3. Ordenamos: Primero los que tienen más días de atraso
     data_cartera.sort(key=lambda x: x['dias_atraso'], reverse=True)
-
     return Response(data_cartera)
