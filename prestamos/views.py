@@ -577,6 +577,10 @@ def cartera_vencida_hibrida(request):
 
                 # Regla Alexander (Domingo no cuenta)
                 if fv.weekday() == 6: fv += timedelta(days=1)
+                if p.id == 28: # El ID de Javier
+                    print(f"DEBUG JAVIER -> Cuota {i}: fv={fv}, hoy={hoy}, fv < hoy: {fv < hoy}")
+                    pagado = p.abonos.filter(semana_numero=i).exists()
+                    print(f"DEBUG JAVIER -> Pagado: {pagado}")
 
                 # Si la fecha ya pasó, verificamos si está pagada
                 if fv < hoy:
