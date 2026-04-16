@@ -592,13 +592,12 @@ def cartera_vencida_hibrida(request):
                     fv += timedelta(days=1)
 
                 # Comparación estricta (<=) para que el día de hoy ya cuente como vencido
-                if fv <= hoy:
-                    # Verificar si existe un abono para esta cuota específica
+                if fv < hoy:
                     pagado = p.abonos.filter(semana_numero=i).exists()
                     if not pagado:
                         atraso_detectado = True
                         fecha_vencimiento_antigua = fv
-                        break # Encontramos la deuda más vieja, dejamos de buscar
+                        break
             
             # --- CÁLCULO DE MULTAS ACTIVAS ---
             multas_activas = p.penalizaciones.filter(activa=True)
