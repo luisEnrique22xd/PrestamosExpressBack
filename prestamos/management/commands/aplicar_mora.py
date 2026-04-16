@@ -21,6 +21,7 @@ class Command(BaseCommand):
 
             if tiene_atraso:
                 # Evitar duplicados: Revisa si ya se aplicó mora el día de HOY
+                self.stdout.write(f"ATRASO DETECTADO en préstamo {p.id} ({p.cliente})")
                 ya_aplicado = Penalizacion.objects.filter(
                     prestamo=p, 
                     fecha_aplicacion=hoy 
@@ -69,7 +70,7 @@ class Command(BaseCommand):
                 fecha_pago += timedelta(days=1)
 
             # Si la fecha de pago ya pasó y no hay abono registrado
-            if fecha_pago < hoy:
+            if fecha_pago <= hoy:
                 pagado = p.abonos.filter(semana_numero=i).exists()
                 if not pagado:
                     return True 
