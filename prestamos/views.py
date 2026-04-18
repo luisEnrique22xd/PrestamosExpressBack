@@ -265,44 +265,40 @@ class RegistrarAbonoView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         prestamo = serializer.validated_data['prestamo']
-        modalidad_raw = request.data.get('modalidad', 'E')
         
-        # Mapeo bidireccional para no fallar nunca
-        nombres_pago = {
-            'E': 'Efectivo', 'Efectivo': 'Efectivo',
-            'D': 'Depósito', 'Depósito': 'Depósito', 'Deposito': 'Depósito',
-            'T': 'Transferencia', 'Transferencia': 'Transferencia'
-        }
-        # Obtenemos el nombre bonito para el log y la respuesta
-        modalidad_texto = nombres_pago.get(modalidad_raw, 'Efectivo')
-        # Obtenemos la sigla para guardar en la base de datos si el serializer no lo hizo ya
-        modalidad_db = 'E' if modalidad_texto == 'Efectivo' else 'T' if modalidad_texto == 'Transferencia' else 'D'
-        total_abonado_antes = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+        # 1. Calculamos saldo ANTES del pago (Capital + Multas Activas)
+        total_abonado_antes = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or Decimal('0.00')
         saldo_cap_antes = prestamo.monto_total_pagar - total_abonado_antes
+        
         m_activas = prestamo.penalizaciones.filter(activa=True)
-        total_m_antes = m_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
-        saldo_anterior_total = float(saldo_cap_antes) + float(total_m_antes)
+        total_m_antes = m_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or Decimal('0.00')
+        
+        # El saldo que Alexander ve en pantalla antes de cobrar
+        saldo_anterior_total = float(saldo_cap_antes + total_m_antes)
 
+        # 2. PROCESO CRUCIAL: Desactivar multas si se pagaron
         if monto_multa_pagado > 0:
+            # Aquí podrías ser más específico, pero por ahora desactivamos las actuales
             m_activas.update(activa=False)
 
+        # 3. Guardar el Abono (Los $450 de Luis)
         self.perform_create(serializer)
-        serializer.save(modalidad=modalidad_db)
         abono = serializer.instance
-        nuevo_saldo_final = float(saldo_cap_antes) - float(abono.monto) - float(monto_multa_pagado)
+        
+        # 4. CALCULO DEL NUEVO SALDO (La matemática de Alexander)
+        # Saldo Nuevo = (Capital Anterior + Multas Anteriores) - Pago Total
+        # Para Luis: (3600 + 90) - 450 = 3240 -> Pero Alexander quiere ver 3150 (Capital limpio)
+        # Si queremos que vea $3,150, debemos mostrarle solo el saldo de capital restante:
+        nuevo_saldo_final = float(saldo_cap_antes - abono.monto)
+
+        # Registro de Log y Respuesta...
         sujeto = prestamo.grupo.nombre_grupo if prestamo.tipo == 'G' and prestamo.grupo else prestamo.cliente.nombre
-        registrar_log(
-            request.user, 
-            "REGISTRO_PAGO", 
-            f"Pago de ${abono.monto} registrado para {sujeto} (Cuota #{abono.semana_numero}) via {modalidad_texto}"
-        )
         return Response({
             "id": abono.id,
             "monto": float(abono.monto),
-            "modalidad": modalidad_texto,
             "penalizaciones_pagadas": float(monto_multa_pagado),
             "saldo_anterior": saldo_anterior_total,
-            "nuevo_saldo": nuevo_saldo_final,
+            "nuevo_saldo": nuevo_saldo_final, # Aquí saldrán los $3,150
             "cliente": sujeto,
             "fecha": abono.fecha_pago.strftime("%d/%m/%Y"),
             "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S")

@@ -288,12 +288,13 @@ class HistorialPagosSerializer(serializers.ModelSerializer):
         nombre = obj.prestamo.grupo.nombre_grupo if obj.prestamo.tipo == 'G' else obj.prestamo.cliente.nombre
         return nombre.upper() # Así se ve parejo siempre
     def get_saldo_anterior(self, obj):
-        # Sumamos abonos anteriores al actual para este préstamo
+        # Saldo de capital justo antes de este abono
         pagos_anteriores = Abono.objects.filter(
             prestamo=obj.prestamo, 
             id__lt=obj.id
-        ).aggregate(Sum('monto'))['monto__sum'] or 0
+        ).aggregate(Sum('monto'))['monto__sum'] or Decimal('0.00')
         return float(obj.prestamo.monto_total_pagar - pagos_anteriores)
 
     def get_nuevo_saldo(self, obj):
+        # Simplemente restamos el abono actual al saldo anterior de capital
         return self.get_saldo_anterior(obj) - float(obj.monto)
