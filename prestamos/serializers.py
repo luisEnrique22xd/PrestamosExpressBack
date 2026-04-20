@@ -200,7 +200,7 @@ class PrestamoSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'cliente', 'cliente_nombre', 'monto_capital', 
             'monto_total_pagar', 'cuotas', 'modalidad', 'fecha_inicio',
-            'nombre_aval', 'telefono_aval', 'direccion_aval', 
+            'nombre_aval', 'telefono_aval', 'direccion_aval','nombre_aval_2', 'telefono_aval_2', 'direccion_aval_2', 'curp_aval_2', 'parentesco_aval_2', 
             'curp_aval', 'parentesco_aval', 'activo','garantia_descripcion',
             'total_penalizaciones',"nombre_sujeto", 'tipo_display','folio_pagare',
         ]
