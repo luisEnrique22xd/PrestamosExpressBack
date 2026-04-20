@@ -577,7 +577,7 @@ def cartera_vencida_hibrida(request):
                 if fv.weekday() == 6: fv += timedelta(days=1)
 
                 # Usamos <= para que Alexander vea el aviso desde el primer minuto del vencimiento
-                if fv <= hoy:
+                if fv < hoy:
                     pagado = p.abonos.filter(semana_numero=i).exists()
                     if not pagado:
                         atraso_detectado = True
