@@ -76,7 +76,11 @@ class Prestamo(models.Model):
     activo = models.BooleanField(default=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     monto_total_pagar = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-
+    nombre_aval_2 = models.CharField(max_length=200, null=True, blank=True)
+    telefono_aval_2 = models.CharField(max_length=20, null=True, blank=True)
+    curp_aval_2 = models.CharField(max_length=18, null=True, blank=True)
+    parentesco_aval_2 = models.CharField(max_length=100, null=True, blank=True)
+    direccion_aval_2 = models.TextField(null=True, blank=True)
     def clean(self):
         # 1. Verificar si el cliente ya tiene UN préstamo individual activo
         if self.cliente:

@@ -204,7 +204,19 @@ class PrestamoSerializer(serializers.ModelSerializer):
             'curp_aval', 'parentesco_aval', 'activo','garantia_descripcion',
             'total_penalizaciones',"nombre_sujeto", 'tipo_display','folio_pagare',
         ]
-
+    def validate(self, data):
+        """
+        Validación: Si el préstamo supera los $7,500, el segundo aval es obligatorio.
+        """
+        monto = data.get('monto_capital')
+        
+        if monto and monto > 7500:
+            # Verificamos que los campos esenciales del segundo aval no estén vacíos
+            if not data.get('nombre_aval_2') or not data.get('curp_aval_2'):
+                raise serializers.ValidationError({
+                    "nombre_aval_2": "Para préstamos mayores a $7,500 es obligatorio registrar un segundo aval con nombre y CURP."
+                })
+        return data
     def get_total_penalizaciones(self, obj):
         return obj.penalizaciones.filter(activa=True).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
 
