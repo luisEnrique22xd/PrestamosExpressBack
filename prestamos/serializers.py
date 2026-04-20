@@ -151,10 +151,21 @@ class ClienteSerializer(serializers.ModelSerializer):
         return None
 
     def get_saldo_actual(self, obj):
-        prestamo = obj.prestamos.filter(activo=True).first()
-        if not prestamo: return 0
-        total_pagado = prestamo.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-        return float(prestamo.monto_total_pagar - total_pagado)
+        # Usamos .last() para asegurar que traemos el más reciente si hay varios
+        prestamo = obj.prestamos.filter(activo=True).last()
+        if not prestamo: 
+            return 0
+        
+        # 1. Calculamos el Capital Pendiente
+        total_abonado = Abono.objects.filter(prestamo=prestamo).aggregate(Sum('monto'))['monto__sum'] or Decimal('0.00')
+        capital_pendiente = prestamo.monto_total_pagar - total_abonado
+        
+        # 2. Sumamos las Multas que aún no se pagan
+        # (Importante: como ya no se suman al monto_total_pagar, hay que traerlas de su tabla)
+        multas_activas = prestamo.penalizaciones.filter(activa=True).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or Decimal('0.00')
+        
+        # 3. Devolvemos la DEUDA REAL TOTAL
+        return float(capital_pendiente + multas_activas)
 
     def get_numero_prestamos(self, obj):
         return obj.prestamos.count()

@@ -42,9 +42,6 @@ class Command(BaseCommand):
                         fecha_aplicacion=hoy
                     )
                     
-                    p.monto_total_pagar += monto_mora
-                    p.save()
-                    
                     conteo_aplicados += 1
                     self.stdout.write(self.style.SUCCESS(f"Mora de ${monto_mora} aplicada a: {p.cliente if p.cliente else p.grupo}"))
 

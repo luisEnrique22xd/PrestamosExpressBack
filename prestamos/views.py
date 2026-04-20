@@ -278,8 +278,7 @@ class RegistrarAbonoView(generics.CreateAPIView):
 
         # 2. PROCESO CRUCIAL: Desactivar multas si se pagaron
         if monto_multa_pagado > 0:
-            # Aquí podrías ser más específico, pero por ahora desactivamos las actuales
-            m_activas.update(activa=False)
+            prestamo.penalizaciones.filter(activa=True).update(activa=False)
 
         # 3. Guardar el Abono (Los $450 de Luis)
         self.perform_create(serializer)
