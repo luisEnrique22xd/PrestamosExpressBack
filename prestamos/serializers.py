@@ -251,16 +251,13 @@ class AbonoSerializer(serializers.ModelSerializer):
         return value
 
 # 4. SERIALIZER HÍBRIDO (Para el Buscador de Pagos)
+# 4. SERIALIZER HÍBRIDO (Corregido para evitar Error 500)
 class DirectorioHibridoSerializer(serializers.Serializer):
-    prestamos_activos = serializers.SerializerMethodField()
-    monto_total_pagar = serializers.FloatField(required=False)
-    cuotas = serializers.IntegerField(required=False)
     id = serializers.IntegerField()
     nombre = serializers.SerializerMethodField()
     es_grupo = serializers.BooleanField()
     curp = serializers.CharField(required=False, allow_null=True)
     fecha_nacimiento = serializers.DateField(required=False, allow_null=True)
-    # Los declaramos solo como MethodField para que usen tus funciones de abajo
     saldo_actual = serializers.SerializerMethodField()
     total_penalizaciones = serializers.SerializerMethodField()
     id_mora_activa = serializers.SerializerMethodField()
@@ -270,54 +267,22 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     num_integrantes = serializers.SerializerMethodField()
     ultimo_prestamo_id = serializers.SerializerMethodField()
     datos_ultimo_aval = serializers.SerializerMethodField()
-    penalizaciones = serializers.JSONField() # Este es el que usa la lista de multas
+    penalizaciones = serializers.JSONField()
+    
+    # 🔥 El campo de la discordia corregido:
+    prestamos_activos = serializers.SerializerMethodField()
 
-    def get_datos_ultimo_aval(self, obj):
-        from prestamos.models import Prestamo
-        
-        # Usamos el método que ya tenemos para obtener el ID
-        prestamo_id = self.get_ultimo_prestamo_id(obj)
-        
-        if prestamo_id:
-            prestamo = Prestamo.objects.filter(id=prestamo_id).first()
-            if prestamo and prestamo.nombre_aval:
-                return {
-                    "nombre_aval": prestamo.nombre_aval,
-                    "telefono_aval": prestamo.telefono_aval,
-                    "direccion_aval": prestamo.direccion_aval,
-                    "parentesco_aval": prestamo.parentesco_aval
-                }
-        return None
-    def get_total_penalizaciones(self, obj):
-        # Usamos getattr porque obj puede no tener el atributo si no tiene prestamo activo
-        return getattr(obj, 'total_penalizaciones', 0.0)
-
-    def get_id_mora_activa(self, obj):
-        return getattr(obj, 'id_mora_activa', None)
-
-    def get_nombre(self, obj):
-        return obj.nombre if hasattr(obj, 'nombre') else obj.nombre_grupo
-
-    def get_ultimo_prestamo_id(self, obj):
-        return getattr(obj, 'ultimo_prestamo_id', None)
-
-    def get_saldo_actual(self, obj):
-        return getattr(obj, 'saldo_actual', 0.0)
-
-    def get_tiene_prestamo_activo(self, obj):
-        return getattr(obj, 'tiene_prestamo_activo', False)
-
-    def get_num_integrantes(self, obj):
-        return obj.integrantes.count() if hasattr(obj, 'integrantes') else 1
     def get_prestamos_activos(self, obj):
-        from prestamos.models import Prestamo
-        # Detectamos si es cliente o grupo
+        # ⚠️ IMPORTANTE: Usamos apps.get_model para evitar el Error 500 por importación circular
+        from django.apps import apps
+        PrestamoModel = apps.get_model('prestamos', 'Prestamo')
+        
+        # Detectamos si es cliente (tiene curp) o grupo
         es_persona = hasattr(obj, 'nombre')
         filtros = {'cliente': obj, 'activo': True} if es_persona else {'grupo': obj, 'activo': True}
         
-        queryset = Prestamo.objects.filter(**filtros).order_by('-fecha_creacion')
+        queryset = PrestamoModel.objects.filter(**filtros).order_by('-fecha_creacion')
         
-        # Retornamos los datos clave de cada préstamo
         return [{
             "id": p.id,
             "folio": p.folio_pagare,
@@ -326,6 +291,43 @@ class DirectorioHibridoSerializer(serializers.Serializer):
             "modalidad": p.get_modalidad_display(),
             "aval": p.nombre_aval
         } for p in queryset]
+
+    # --- Otros métodos (Asegúrate de no tener duplicados abajo) ---
+    def get_nombre(self, obj):
+        return obj.nombre if hasattr(obj, 'nombre') else obj.nombre_grupo
+
+    def get_saldo_actual(self, obj):
+        return getattr(obj, 'saldo_actual', 0.0)
+
+    def get_total_penalizaciones(self, obj):
+        return getattr(obj, 'total_penalizaciones', 0.0)
+
+    def get_id_mora_activa(self, obj):
+        return getattr(obj, 'id_mora_activa', None)
+
+    def get_tiene_prestamo_activo(self, obj):
+        return getattr(obj, 'tiene_prestamo_activo', False)
+
+    def get_ultimo_prestamo_id(self, obj):
+        return getattr(obj, 'ultimo_prestamo_id', None)
+
+    def get_num_integrantes(self, obj):
+        return obj.integrantes.count() if hasattr(obj, 'integrantes') else 1
+
+    def get_datos_ultimo_aval(self, obj):
+        from django.apps import apps
+        PrestamoModel = apps.get_model('prestamos', 'Prestamo')
+        prestamo_id = self.get_ultimo_prestamo_id(obj)
+        if prestamo_id:
+            prestamo = PrestamoModel.objects.filter(id=prestamo_id).first()
+            if prestamo:
+                return {
+                    "nombre_aval": prestamo.nombre_aval,
+                    "telefono_aval": prestamo.telefono_aval,
+                    "direccion_aval": prestamo.direccion_aval,
+                    "parentesco_aval": prestamo.parentesco_aval
+                }
+        return None
 # 5. SERIALIZER PARA LA BÓVEDA DE TICKETS (En Perfil de Usuario)
 class HistorialPagosSerializer(serializers.ModelSerializer):
     cliente = serializers.SerializerMethodField()
