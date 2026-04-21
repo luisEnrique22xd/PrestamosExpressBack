@@ -250,8 +250,6 @@ class AbonoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("El monto debe ser mayor a cero.")
         return value
 
-# 4. SERIALIZER HÍBRIDO (Para el Buscador de Pagos)
-# 4. SERIALIZER HÍBRIDO (Corregido para evitar Error 500)
 class DirectorioHibridoSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     nombre = serializers.SerializerMethodField()
@@ -269,30 +267,24 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     datos_ultimo_aval = serializers.SerializerMethodField()
     penalizaciones = serializers.JSONField()
     
-    # 🔥 El campo de la discordia corregido:
+    # Campo para la lista de deudas separadas
     prestamos_activos = serializers.SerializerMethodField()
 
     def get_prestamos_activos(self, obj):
-        # ⚠️ IMPORTANTE: Usamos apps.get_model para evitar el Error 500 por importación circular
-        from django.apps import apps
-        PrestamoModel = apps.get_model('prestamos', 'Prestamo')
-        
-        # Detectamos si es cliente (tiene curp) o grupo
-        es_persona = hasattr(obj, 'nombre')
-        filtros = {'cliente': obj, 'activo': True} if es_persona else {'grupo': obj, 'activo': True}
-        
-        queryset = PrestamoModel.objects.filter(**filtros).order_by('-fecha_creacion')
-        
-        return [{
-            "id": p.id,
-            "folio": p.folio_pagare,
-            "capital": float(p.monto_capital),
-            "total_pagar": float(p.monto_total_pagar),
-            "modalidad": p.get_modalidad_display(),
-            "aval": p.nombre_aval
-        } for p in queryset]
+        # Accedemos a los préstamos a través del related_name 'prestamos' definido en tu modelo
+        if hasattr(obj, 'prestamos'):
+            # Filtramos solo los activos
+            qs = obj.prestamos.filter(activo=True).order_by('-fecha_creacion')
+            return [{
+                "id": p.id,
+                "folio": p.folio_pagare,
+                "monto_total": float(p.monto_total_pagar),
+                "capital": float(p.monto_capital),
+                "modalidad": p.get_modalidad_display(),
+                "aval": p.nombre_aval
+            } for p in qs]
+        return []
 
-    # --- Otros métodos (Asegúrate de no tener duplicados abajo) ---
     def get_nombre(self, obj):
         return obj.nombre if hasattr(obj, 'nombre') else obj.nombre_grupo
 
@@ -309,23 +301,24 @@ class DirectorioHibridoSerializer(serializers.Serializer):
         return getattr(obj, 'tiene_prestamo_activo', False)
 
     def get_ultimo_prestamo_id(self, obj):
-        return getattr(obj, 'ultimo_prestamo_id', None)
+        # Intentamos obtener el ID del último préstamo activo de forma segura
+        if hasattr(obj, 'prestamos'):
+            last_p = obj.prestamos.filter(activo=True).last()
+            return last_p.id if last_p else None
+        return None
 
     def get_num_integrantes(self, obj):
         return obj.integrantes.count() if hasattr(obj, 'integrantes') else 1
 
     def get_datos_ultimo_aval(self, obj):
-        from django.apps import apps
-        PrestamoModel = apps.get_model('prestamos', 'Prestamo')
-        prestamo_id = self.get_ultimo_prestamo_id(obj)
-        if prestamo_id:
-            prestamo = PrestamoModel.objects.filter(id=prestamo_id).first()
-            if prestamo:
+        if hasattr(obj, 'prestamos'):
+            p = obj.prestamos.filter(activo=True).last()
+            if p:
                 return {
-                    "nombre_aval": prestamo.nombre_aval,
-                    "telefono_aval": prestamo.telefono_aval,
-                    "direccion_aval": prestamo.direccion_aval,
-                    "parentesco_aval": prestamo.parentesco_aval
+                    "nombre_aval": p.nombre_aval,
+                    "telefono_aval": p.telefono_aval,
+                    "direccion_aval": p.direccion_aval,
+                    "parentesco_aval": p.parentesco_aval
                 }
         return None
 # 5. SERIALIZER PARA LA BÓVEDA DE TICKETS (En Perfil de Usuario)
