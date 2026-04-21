@@ -252,6 +252,7 @@ class AbonoSerializer(serializers.ModelSerializer):
 
 # 4. SERIALIZER HÍBRIDO (Para el Buscador de Pagos)
 class DirectorioHibridoSerializer(serializers.Serializer):
+    prestamos_activos = serializers.SerializerMethodField()
     monto_total_pagar = serializers.FloatField(required=False)
     cuotas = serializers.IntegerField(required=False)
     id = serializers.IntegerField()
@@ -308,6 +309,23 @@ class DirectorioHibridoSerializer(serializers.Serializer):
 
     def get_num_integrantes(self, obj):
         return obj.integrantes.count() if hasattr(obj, 'integrantes') else 1
+    def get_prestamos_activos(self, obj):
+        from prestamos.models import Prestamo
+        # Detectamos si es cliente o grupo
+        es_persona = hasattr(obj, 'nombre')
+        filtros = {'cliente': obj, 'activo': True} if es_persona else {'grupo': obj, 'activo': True}
+        
+        queryset = Prestamo.objects.filter(**filtros).order_by('-fecha_creacion')
+        
+        # Retornamos los datos clave de cada préstamo
+        return [{
+            "id": p.id,
+            "folio": p.folio_pagare,
+            "capital": float(p.monto_capital),
+            "total_pagar": float(p.monto_total_pagar),
+            "modalidad": p.get_modalidad_display(),
+            "aval": p.nombre_aval
+        } for p in queryset]
 # 5. SERIALIZER PARA LA BÓVEDA DE TICKETS (En Perfil de Usuario)
 class HistorialPagosSerializer(serializers.ModelSerializer):
     cliente = serializers.SerializerMethodField()
