@@ -89,6 +89,7 @@ class ClienteSerializer(serializers.ModelSerializer):
     total_penalizaciones = serializers.SerializerMethodField()
     id_mora_activa = serializers.SerializerMethodField()
     tiene_moras_activas = serializers.SerializerMethodField()
+    prestamos_activos = serializers.SerializerMethodField()
 
     class Meta:
         model = Cliente
@@ -96,7 +97,7 @@ class ClienteSerializer(serializers.ModelSerializer):
             'id', 'nombre', 'telefono', 'curp', 'direccion','fecha_nacimiento', 
             'datos_ultimo_aval','progreso_pagos', 'historial_grafico', 
             'ultimo_prestamo_id','tiene_prestamo_activo','saldo_actual',
-            'numero_prestamos','total_penalizaciones', 'id_mora_activa','tiene_moras_activas'
+            'numero_prestamos','total_penalizaciones', 'id_mora_activa','tiene_moras_activas','prestamos_activos'
         ]
 
     def get_tiene_prestamo_activo(self, obj):
