@@ -209,7 +209,20 @@ class PrestamoSerializer(serializers.ModelSerializer):
         Validación: Si el préstamo supera los $7,500, el segundo aval es obligatorio.
         """
         monto = data.get('monto_capital')
+        cliente = data.get('cliente')
+        # Extraemos la bandera de urgencia que enviaremos desde el Front
+        es_urgente = self.context.get('request').data.get('es_urgente', False)
         
+        # 1. VALIDACIÓN DE DEUDA PREVIA (Solo si no es urgente)
+        if cliente and not es_urgente:
+            # Asumiendo que tu modelo Cliente tiene saldo_actual o un método similar
+            if cliente.saldo_actual > 0:
+                raise serializers.ValidationError({
+                    "error": f"El cliente {cliente.nombre} tiene una deuda activa de ${cliente.saldo_actual}. Active el modo urgente para permitir un segundo préstamo."
+                })
+        
+        
+        # 2. VALIDACIÓN DE SEGUNDO AVAL (Esta se queda igual)
         if monto and monto > 7500:
             # Verificamos que los campos esenciales del segundo aval no estén vacíos
             if not data.get('nombre_aval_2') or not data.get('curp_aval_2'):
