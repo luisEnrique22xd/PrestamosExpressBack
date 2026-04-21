@@ -89,6 +89,7 @@ class ClienteSerializer(serializers.ModelSerializer):
     total_penalizaciones = serializers.SerializerMethodField()
     id_mora_activa = serializers.SerializerMethodField()
     tiene_moras_activas = serializers.SerializerMethodField()
+    # 🔥 Agregamos el campo que necesita el Front para las tarjetas
     prestamos_activos = serializers.SerializerMethodField()
 
     class Meta:
@@ -97,97 +98,98 @@ class ClienteSerializer(serializers.ModelSerializer):
             'id', 'nombre', 'telefono', 'curp', 'direccion','fecha_nacimiento', 
             'datos_ultimo_aval','progreso_pagos', 'historial_grafico', 
             'ultimo_prestamo_id','tiene_prestamo_activo','saldo_actual',
-            'numero_prestamos','total_penalizaciones', 'id_mora_activa','tiene_moras_activas','prestamos_activos'
+            'numero_prestamos','total_penalizaciones', 'id_mora_activa',
+            'tiene_moras_activas', 'prestamos_activos'
         ]
 
+    def get_prestamos_activos(self, obj):
+        # Usamos related_name 'prestamos'
+        qs = obj.prestamos.filter(activo=True).order_by('-fecha_creacion')
+        return [{
+            "id": p.id,
+            "folio": p.folio_pagare or 0,
+            "monto_total": float(p.monto_total_pagar),
+            "capital": float(p.monto_capital),
+            "modalidad": p.get_modalidad_display(),
+            "aval": p.nombre_aval
+        } for p in qs]
+
+    def get_saldo_actual(self, obj):
+        from django.db.models import Sum
+        # Calculamos la deuda real sumando saldo de cada préstamo activo
+        total_global = 0
+        prestamos = obj.prestamos.filter(activo=True)
+        
+        for p in prestamos:
+            # Suma de abonos de este préstamo
+            pagado = p.abonos.aggregate(total=Sum('monto'))['total'] or 0
+            # Suma de multas activas de este préstamo
+            multas = p.penalizaciones.filter(activa=True).aggregate(total=Sum('monto_penalizado'))['total'] or 0
+            
+            saldo_p = (float(p.monto_total_pagar) - float(pagado)) + float(multas)
+            total_global += saldo_p
+            
+        return total_global
+
     def get_tiene_prestamo_activo(self, obj):
-        prestamo = obj.prestamos.filter(activo=True).first()
-        if prestamo:
-            total_pagado = Abono.objects.filter(prestamo=prestamo).aggregate(Sum('monto'))['monto__sum'] or 0
-            if total_pagado >= prestamo.monto_total_pagar:
-                prestamo.activo = False
-                prestamo.save()
-                return False
-            return True
-        return False
-    
+        return obj.prestamos.filter(activo=True).exists()
+
+    def get_ultimo_prestamo_id(self, obj):
+        ultimo = obj.prestamos.filter(activo=True).last()
+        return ultimo.id if ultimo else None
+
     def get_progreso_pagos(self, obj):
-        ultimo_p = obj.prestamos.last()
+        # Mantenemos la lógica para el gráfico superior basada en el último
+        ultimo_p = obj.prestamos.filter(activo=True).last()
         if not ultimo_p: return {"pagado": 0, "pendiente": 100}
-        total_pagado = ultimo_p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-        porcentaje = (total_pagado / ultimo_p.monto_total_pagar) * 100 if ultimo_p.monto_total_pagar > 0 else 0
+        from django.db.models import Sum
+        total_pagado = ultimo_p.abonos.aggregate(total=Sum('monto'))['total'] or 0
+        porcentaje = (float(total_pagado) / float(ultimo_p.monto_total_pagar)) * 100 if ultimo_p.monto_total_pagar > 0 else 0
         return {
-            "pagado": float(porcentaje),
-            "pendiente": float(100 - porcentaje),
+            "pagado": round(porcentaje, 2),
             "monto_pagado": float(total_pagado),
             "monto_total": float(ultimo_p.monto_total_pagar),
             "monto_capital": float(ultimo_p.monto_capital),
             "modalidad": ultimo_p.modalidad,
             "total_cuotas": ultimo_p.cuotas,
         }
-    
-    def get_historial_grafico(self, obj):
-        ultimo_p = obj.prestamos.last()
-        if not ultimo_p: return []
-        return [
-            {"semana": f"Sem {a.semana_numero}", "pago": float(a.monto)} 
-            for a in ultimo_p.abonos.all().order_by('semana_numero')
-        ]
 
-    def get_ultimo_prestamo_id(self, obj):
-        ultimo_p = obj.prestamos.last()
-        return ultimo_p.id if ultimo_p else None
-    
+    def get_historial_grafico(self, obj):
+        ultimo_p = obj.prestamos.filter(activo=True).last()
+        if not ultimo_p: return []
+        return [{"semana": f"Sem {a.semana_numero}", "pago": float(a.monto)} 
+                for a in ultimo_p.abonos.all().order_by('semana_numero')]
+
     def get_datos_ultimo_aval(self, obj):
-        ultimo_p = obj.prestamos.order_by('-id').first()
-        if ultimo_p:
+        p = obj.prestamos.filter(activo=True).last()
+        if p:
             return {
-                "nombre_aval": ultimo_p.nombre_aval,
-                "telefono_aval": ultimo_p.telefono_aval,
-                "direccion_aval": ultimo_p.direccion_aval,
-                "curp_aval": ultimo_p.curp_aval,
-                "parentesco_aval": ultimo_p.parentesco_aval,
-                "garantia_descripcion": ultimo_p.garantia_descripcion,
+                "nombre_aval": p.nombre_aval,
+                "telefono_aval": p.telefono_aval,
+                "direccion_aval": p.direccion_aval,
+                "curp_aval": p.curp_aval,
+                "parentesco_aval": p.parentesco_aval,
+                "garantia_descripcion": p.garantia_descripcion,
             }
         return None
-
-    def get_saldo_actual(self, obj):
-        # Usamos .last() para asegurar que traemos el más reciente si hay varios
-        prestamo = obj.prestamos.filter(activo=True).last()
-        if not prestamo: 
-            return 0
-        
-        # 1. Calculamos el Capital Pendiente
-        total_abonado = Abono.objects.filter(prestamo=prestamo).aggregate(Sum('monto'))['monto__sum'] or Decimal('0.00')
-        capital_pendiente = prestamo.monto_total_pagar - total_abonado
-        
-        # 2. Sumamos las Multas que aún no se pagan
-        # (Importante: como ya no se suman al monto_total_pagar, hay que traerlas de su tabla)
-        multas_activas = prestamo.penalizaciones.filter(activa=True).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or Decimal('0.00')
-        
-        # 3. Devolvemos la DEUDA REAL TOTAL
-        return float(capital_pendiente + multas_activas)
 
     def get_numero_prestamos(self, obj):
         return obj.prestamos.count()
 
     def get_total_penalizaciones(self, obj):
-        prestamo = obj.prestamos.filter(activo=True).last()
-        if prestamo:
-            res = prestamo.penalizaciones.filter(activa=True).aggregate(total=Sum('monto_penalizado'))
-            return float(res['total'] or 0)
-        return 0
+        from django.db.models import Sum
+        res = obj.prestamos.filter(activo=True).aggregate(total=Sum('penalizaciones__monto_penalizado'))
+        return float(res['total'] or 0)
 
     def get_id_mora_activa(self, obj):
-        prestamo = obj.prestamos.filter(activo=True).last()
-        if prestamo:
-            ultima_mora = prestamo.penalizaciones.filter(activa=True).last()
-            return ultima_mora.id if ultima_mora else None
+        p = obj.prestamos.filter(activo=True).last()
+        if p:
+            ultima = p.penalizaciones.filter(activa=True).last()
+            return ultima.id if ultima else None
         return None
-    def get_tiene_moras_activas(self, obj):
-        # Buscamos si tiene penalizaciones activas en CUALQUIERA de sus préstamos
-        return Penalizacion.objects.filter(prestamo__cliente=obj, activa=True).exists()
 
+    def get_tiene_moras_activas(self, obj):
+        return obj.prestamos.filter(activo=True, penalizaciones__activa=True).exists()
 # 2. SERIALIZER DE PRÉSTAMOS
 class PrestamoSerializer(serializers.ModelSerializer):
     
