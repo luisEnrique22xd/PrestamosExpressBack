@@ -284,6 +284,7 @@ class DirectorioHibridoSerializer(serializers.Serializer):
                 "folio": p.folio_pagare,
                 "monto_total": float(p.monto_total_pagar),
                 "capital": float(p.monto_capital),
+                "cuotas": p.cuotas,
                 "modalidad": p.get_modalidad_display(),
                 "aval": p.nombre_aval
             } for p in qs]
