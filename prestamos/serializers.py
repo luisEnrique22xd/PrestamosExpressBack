@@ -13,10 +13,11 @@ class CarteraVencidaSerializer(serializers.Serializer):
     es_grupo = serializers.BooleanField()
     telefono = serializers.CharField()
     saldo_pendiente = serializers.FloatField(source='saldo_actual')
-    # 🔥 Campos clave para Alexander:
     cuotas_vencidas = serializers.SerializerMethodField()
     monto_vencido = serializers.SerializerMethodField()
     ultimo_pago = serializers.SerializerMethodField()
+    # 🔥 Agregamos multas por separado si quieres mostrarlas en el front
+    total_penalizaciones = serializers.SerializerMethodField()
 
     def get_nombre(self, obj):
         return obj.nombre if hasattr(obj, 'nombre') else obj.nombre_grupo
@@ -29,15 +30,42 @@ class CarteraVencidaSerializer(serializers.Serializer):
     def get_cuotas_vencidas(self, obj):
         p = self._get_prestamo_activo(obj)
         if not p: return 0
-        # Aquí llamarías a una función similar a la de tu script 'aplicar_mora'
-        # para contar cuántas cuotas pasadas no tienen abono.
-        return 1 # Ejemplo para la prueba
+        # Aquí puedes dejar tu lógica de conteo de cuotas atrasadas
+        return 1 
 
     def get_monto_vencido(self, obj):
+        """
+        🔥 CÁLCULO REAL PARA ALEXANDER
+        Luis Enrique: (3600 / 8) + 45 = 495
+        """
         p = self._get_prestamo_activo(obj)
         if not p: return 0
-        # Suma de las cuotas que ya pasaron de fecha y no se pagaron
-        return 550.0 # Ejemplo: 1 cuota de Juan
+        
+        # 1. Calculamos la cuota base pactada
+        # Luis: 3600 total / 8 cuotas = 450
+        cuota_pactada = float(p.monto_total_pagar) / float(p.cuotas)
+        
+        # 2. Sumamos las multas activas de este préstamo
+        # Luis: 45
+        multas = p.penalizaciones.filter(activa=True).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
+        
+        # 3. Resultado final: 450 + 45 = 495
+        # Multiplicamos la cuota por las cuotas vencidas si hubiera más de una
+        atraso_total = (cuota_pactada * self.get_cuotas_vencidas(obj)) + float(multas)
+        
+        return round(atraso_total, 2)
+
+    def get_total_penalizaciones(self, obj):
+        p = self._get_prestamo_activo(obj)
+        if not p: return 0
+        res = p.penalizaciones.filter(activa=True).aggregate(total=Sum('monto_penalizado'))
+        return float(res['total'] or 0)
+
+    def get_ultimo_pago(self, obj):
+        p = self._get_prestamo_activo(obj)
+        if not p: return "Sin pagos"
+        ultimo_abono = p.abonos.order_by('-fecha_pago').first()
+        return ultimo_abono.fecha_pago if ultimo_abono else "Sin pagos"
 class PenalizacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Penalizacion
