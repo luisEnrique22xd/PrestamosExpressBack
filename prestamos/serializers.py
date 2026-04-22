@@ -304,50 +304,46 @@ class DirectorioHibridoSerializer(serializers.Serializer):
         return obj.nombre if hasattr(obj, 'nombre') else obj.nombre_grupo
 
     def get_saldo_actual(self, obj):
-        """Calcula el saldo total real (Total - Pagado) de todos los préstamos activos"""
-        try:
-            total = 0.0
-            if hasattr(obj, 'prestamos'):
-                # Solo préstamos que estén marcados como activos
-                prestamos = obj.prestamos.filter(activo=True)
-                for p in prestamos:
-                    # Obtenemos cuánto ha pagado Luis o Placido en este folio
-                    pagado = p.abonos.aggregate(total=Sum('monto'))['total'] or 0
-                    total += (float(p.monto_total_pagar) - float(pagado))
-            return round(total, 2)
-        except Exception:
-            return 0.0
-
-    def get_total_penalizaciones(self, obj):
-        """Suma de todas las multas activas de forma segura sin filtros complejos"""
-        try:
-            total_multas = 0.0
-            if hasattr(obj, 'prestamos'):
-                # Obtenemos los préstamos activos
-                prestamos = obj.prestamos.filter(activo=True)
-                for p in prestamos:
-                    # Sumamos las penalizaciones que tengan 'activa=True'
-                    monto = p.penalizaciones.filter(activa=True).aggregate(total=Sum('monto_penalizado'))['total'] or 0
-                    total_multas += float(monto)
-            return float(total_multas)
-        except Exception:
-            return 0.0
+        """Cálculo manual para evitar bloqueos de base de datos"""
+        total_pendiente = 0.0
+        if hasattr(obj, 'prestamos'):
+            # Traemos abonos de una vez para evitar mil consultas
+            prestamos = obj.prestamos.filter(activo=True).prefetch_related('abonos')
+            for p in prestamos:
+                # Sumamos abonos con Python, no con SQL aggregate
+                pagado = sum(float(a.monto) for a in p.abonos.all())
+                total_pendiente += (float(p.monto_total_pagar) - pagado)
+        return round(total_pendiente, 2)
 
     def get_prestamos_activos(self, obj):
+        """Versión optimizada que no causa Timeouts"""
         if hasattr(obj, 'prestamos'):
-            qs = obj.prestamos.filter(activo=True).order_by('-fecha_creacion')
-            return [{
-                "id": p.id,
-                "folio": p.folio_pagare,
-                "monto_total": float(p.monto_total_pagar),
-                "capital": float(p.monto_capital),
-                "cuotas": p.cuotas,
-                # 🔥 Clave: Calculamos el saldo restante de este folio específico
-                "saldo_restante": float(p.monto_total_pagar) - float(p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0),
-                "modalidad": p.get_modalidad_display(),
-                "aval": p.nombre_aval
-            } for p in qs]
+            qs = obj.prestamos.filter(activo=True).order_by('-fecha_creacion').prefetch_related('abonos')
+            data = []
+            for p in qs:
+                # Calculamos el pagado manualmente
+                pagado = sum(float(a.monto) for a in p.abonos.all())
+                data.append({
+                    "id": p.id,
+                    "folio": p.folio_pagare,
+                    "monto_total": float(p.monto_total_pagar),
+                    "capital": float(p.monto_capital),
+                    "cuotas": p.cuotas,
+                    "saldo_restante": round(float(p.monto_total_pagar) - pagado, 2),
+                    "modalidad": p.get_modalidad_display(),
+                    "aval": p.nombre_aval
+                })
+            return data
         return []
+
+    # Repite la misma lógica de sum() manual en get_total_penalizaciones
+    def get_total_penalizaciones(self, obj):
+        total_m = 0.0
+        if hasattr(obj, 'prestamos'):
+            prestamos = obj.prestamos.filter(activo=True).prefetch_related('penalizaciones')
+            for p in prestamos:
+                total_m += sum(float(m.monto_penalizado) for m in p.penalizaciones.filter(activa=True))
+        return total_m
 
     def get_id_mora_activa(self, obj):
         if hasattr(obj, 'prestamos'):
