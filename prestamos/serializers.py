@@ -297,14 +297,32 @@ class DirectorioHibridoSerializer(serializers.Serializer):
     ultimo_prestamo_id = serializers.SerializerMethodField()
     datos_ultimo_aval = serializers.SerializerMethodField()
     penalizaciones = serializers.JSONField()
-    
-    # Campo para la lista de deudas separadas
     prestamos_activos = serializers.SerializerMethodField()
 
-    def get_prestamos_activos(self, obj):
-        # Accedemos a los préstamos a través del related_name 'prestamos' definido en tu modelo
+    def get_nombre(self, obj):
+        return obj.nombre if hasattr(obj, 'nombre') else obj.nombre_grupo
+
+    def get_saldo_actual(self, obj):
+        """Calcula el saldo total real (Total - Pagado) de todos los préstamos activos"""
+        total = 0.0
         if hasattr(obj, 'prestamos'):
-            # Filtramos solo los activos
+            prestamos = obj.prestamos.filter(activo=True)
+            for p in prestamos:
+                pagado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+                total += (float(p.monto_total_pagar) - float(pagado))
+        return total
+
+    def get_total_penalizaciones(self, obj):
+        """Suma de todas las multas activas"""
+        if hasattr(obj, 'prestamos'):
+            res = obj.prestamos.filter(activo=True).aggregate(
+                total=Sum('penalizaciones__monto_penalizado', filter=models.Q(penalizaciones__activa=True))
+            )
+            return float(res['total'] or 0.0)
+        return 0.0
+
+    def get_prestamos_activos(self, obj):
+        if hasattr(obj, 'prestamos'):
             qs = obj.prestamos.filter(activo=True).order_by('-fecha_creacion')
             return [{
                 "id": p.id,
@@ -312,36 +330,36 @@ class DirectorioHibridoSerializer(serializers.Serializer):
                 "monto_total": float(p.monto_total_pagar),
                 "capital": float(p.monto_capital),
                 "cuotas": p.cuotas,
-                "saldo_restante": float(p.monto_total_pagar) - float(p.abonos.aggregate(Sum('monto'))['total'] or 0),
+                # 🔥 Clave: Calculamos el saldo restante de este folio específico
+                "saldo_restante": float(p.monto_total_pagar) - float(p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0),
                 "modalidad": p.get_modalidad_display(),
                 "aval": p.nombre_aval
             } for p in qs]
         return []
 
-    def get_nombre(self, obj):
-        return obj.nombre if hasattr(obj, 'nombre') else obj.nombre_grupo
-
-    def get_saldo_actual(self, obj):
-        return getattr(obj, 'saldo_actual', 0.0)
-
-    def get_total_penalizaciones(self, obj):
-        return getattr(obj, 'total_penalizaciones', 0.0)
-
     def get_id_mora_activa(self, obj):
-        return getattr(obj, 'id_mora_activa', None)
+        if hasattr(obj, 'prestamos'):
+            p = obj.prestamos.filter(activo=True).last()
+            if p:
+                ultima = p.penalizaciones.filter(activa=True).last()
+                return ultima.id if ultima else None
+        return None
 
     def get_tiene_prestamo_activo(self, obj):
-        return getattr(obj, 'tiene_prestamo_activo', False)
+        if hasattr(obj, 'prestamos'):
+            return obj.prestamos.filter(activo=True).exists()
+        return False
 
     def get_ultimo_prestamo_id(self, obj):
-        # Intentamos obtener el ID del último préstamo activo de forma segura
         if hasattr(obj, 'prestamos'):
             last_p = obj.prestamos.filter(activo=True).last()
             return last_p.id if last_p else None
         return None
 
     def get_num_integrantes(self, obj):
-        return obj.integrantes.count() if hasattr(obj, 'integrantes') else 1
+        if hasattr(obj, 'integrantes'):
+            return obj.integrantes.count()
+        return 1
 
     def get_datos_ultimo_aval(self, obj):
         if hasattr(obj, 'prestamos'):
