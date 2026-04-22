@@ -312,6 +312,7 @@ class DirectorioHibridoSerializer(serializers.Serializer):
                 "monto_total": float(p.monto_total_pagar),
                 "capital": float(p.monto_capital),
                 "cuotas": p.cuotas,
+                "saldo_restante": float(p.monto_total_pagar) - float(p.abonos.aggregate(Sum('monto'))['total'] or 0),
                 "modalidad": p.get_modalidad_display(),
                 "aval": p.nombre_aval
             } for p in qs]
