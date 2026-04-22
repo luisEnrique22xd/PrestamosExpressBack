@@ -305,22 +305,33 @@ class DirectorioHibridoSerializer(serializers.Serializer):
 
     def get_saldo_actual(self, obj):
         """Calcula el saldo total real (Total - Pagado) de todos los préstamos activos"""
-        total = 0.0
-        if hasattr(obj, 'prestamos'):
-            prestamos = obj.prestamos.filter(activo=True)
-            for p in prestamos:
-                pagado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
-                total += (float(p.monto_total_pagar) - float(pagado))
-        return total
+        try:
+            total = 0.0
+            if hasattr(obj, 'prestamos'):
+                # Solo préstamos que estén marcados como activos
+                prestamos = obj.prestamos.filter(activo=True)
+                for p in prestamos:
+                    # Obtenemos cuánto ha pagado Luis o Placido en este folio
+                    pagado = p.abonos.aggregate(total=Sum('monto'))['total'] or 0
+                    total += (float(p.monto_total_pagar) - float(pagado))
+            return round(total, 2)
+        except Exception:
+            return 0.0
 
     def get_total_penalizaciones(self, obj):
-        """Suma de todas las multas activas"""
-        if hasattr(obj, 'prestamos'):
-            res = obj.prestamos.filter(activo=True).aggregate(
-                total=Sum('penalizaciones__monto_penalizado', filter=models.Q(penalizaciones__activa=True))
-            )
-            return float(res['total'] or 0.0)
-        return 0.0
+        """Suma de todas las multas activas de forma segura sin filtros complejos"""
+        try:
+            total_multas = 0.0
+            if hasattr(obj, 'prestamos'):
+                # Obtenemos los préstamos activos
+                prestamos = obj.prestamos.filter(activo=True)
+                for p in prestamos:
+                    # Sumamos las penalizaciones que tengan 'activa=True'
+                    monto = p.penalizaciones.filter(activa=True).aggregate(total=Sum('monto_penalizado'))['total'] or 0
+                    total_multas += float(monto)
+            return float(total_multas)
+        except Exception:
+            return 0.0
 
     def get_prestamos_activos(self, obj):
         if hasattr(obj, 'prestamos'):
