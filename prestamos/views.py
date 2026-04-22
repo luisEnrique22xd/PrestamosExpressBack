@@ -590,18 +590,22 @@ def cartera_vencida_hibrida(request):
                 es_grupo = (p.tipo == 'G')
                 nombre = p.grupo.nombre_grupo if (es_grupo and p.grupo) else (p.cliente.nombre if p.cliente else "N/A")
                 
-                monto_final = float(p.monto_total_pagar or 0)
-                cuota_base = (monto_final - total_multas) / (p.cuotas if p.cuotas > 0 else 1)
-                monto_vencido = round((cuota_base if atraso_detectado else 0) + total_multas, 2)
+                # 🔥 CÁLCULO CORREGIDO PARA ALEXANDER:
+                # 1. Obtenemos la cuota pactada (Luis: 3600 / 8 = 450)
+                cuota_fija = float(p.monto_total_pagar) / float(p.cuotas if p.cuotas > 0 else 1)
                 
-                # Días de atraso reales (Hoy 15 - Vencimiento 14 = 1 día)
+                # 2. El monto vencido es: (Cuota * 1) + multas acumuladas
+                # Luis: (450 * 1) + 45 = 495.00
+                monto_vencido = round((cuota_fija if atraso_detectado else 0) + total_multas, 2)
+                
+                # Días de atraso
                 dias = (hoy - fecha_vencimiento_antigua).days if fecha_vencimiento_antigua else 0
 
                 data_cartera.append({
                     "id_prestamo": p.id,
                     "nombre_deudor": nombre,
                     "es_grupo": es_grupo,
-                    "monto_vencido": monto_vencido,
+                    "monto_vencido": monto_vencido, # <--- Ahora enviará 495.00
                     "dias_atraso": dias,
                     "fecha_vencimiento": fecha_vencimiento_antigua.strftime("%Y-%m-%d") if fecha_vencimiento_antigua else "Solo Multas",
                     "telefono": p.telefono_aval if es_grupo else (p.cliente.telefono if p.cliente else ""),
