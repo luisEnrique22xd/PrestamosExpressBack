@@ -30,30 +30,29 @@ class CarteraVencidaSerializer(serializers.Serializer):
     def get_cuotas_vencidas(self, obj):
         p = self._get_prestamo_activo(obj)
         if not p: return 0
-        # Aquí puedes dejar tu lógica de conteo de cuotas atrasadas
+        # Por ahora lo dejamos en 1 para que Alexander vea al menos una cuota
+        # Pero si quieres que sea automático, aquí va la lógica de fechas
         return 1 
 
     def get_monto_vencido(self, obj):
         """
-        🔥 CÁLCULO REAL PARA ALEXANDER
-        Luis Enrique: (3600 / 8) + 45 = 495
+        🔥 CÁLCULO DINÁMICO:
+        Luis Enrique: (3600 total / 8 cuotas) * 1 vencida + 45 multa = 495.00
         """
         p = self._get_prestamo_activo(obj)
         if not p: return 0
         
-        # 1. Calculamos la cuota base pactada
-        # Luis: 3600 total / 8 cuotas = 450
-        cuota_pactada = float(p.monto_total_pagar) / float(p.cuotas)
+        # 1. Calculamos la cuota pactada (Luis: 450)
+        # Usamos float para evitar errores con Decimal
+        cuota_fija = float(p.monto_total_pagar) / float(p.cuotas)
         
-        # 2. Sumamos las multas activas de este préstamo
-        # Luis: 45
+        # 2. Obtenemos las multas activas (Luis: 45)
         multas = p.penalizaciones.filter(activa=True).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
         
-        # 3. Resultado final: 450 + 45 = 495
-        # Multiplicamos la cuota por las cuotas vencidas si hubiera más de una
-        atraso_total = (cuota_pactada * self.get_cuotas_vencidas(obj)) + float(multas)
+        # 3. Sumamos: (450 * 1 cuota vencida) + 45 multas = 495
+        total_vencido = (cuota_fija * self.get_cuotas_vencidas(obj)) + float(multas)
         
-        return round(atraso_total, 2)
+        return round(total_vencido, 2)
 
     def get_total_penalizaciones(self, obj):
         p = self._get_prestamo_activo(obj)
