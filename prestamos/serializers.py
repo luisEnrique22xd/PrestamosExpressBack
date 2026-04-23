@@ -221,7 +221,6 @@ class ClienteSerializer(serializers.ModelSerializer):
         return obj.prestamos.filter(activo=True, penalizaciones__activa=True).exists()
 # 2. SERIALIZER DE PRÉSTAMOS
 class PrestamoSerializer(serializers.ModelSerializer):
-    
     cliente_nombre = serializers.ReadOnlyField(source='cliente.nombre')
     total_penalizaciones = serializers.SerializerMethodField()
     nombre_sujeto = serializers.SerializerMethodField()
@@ -232,36 +231,40 @@ class PrestamoSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'cliente', 'cliente_nombre', 'monto_capital', 
             'monto_total_pagar', 'cuotas', 'modalidad', 'fecha_inicio',
-            'nombre_aval', 'telefono_aval', 'direccion_aval','nombre_aval_2', 'telefono_aval_2', 'direccion_aval_2', 'curp_aval_2', 'parentesco_aval_2', 
+            'nombre_aval', 'telefono_aval', 'direccion_aval','nombre_aval_2', 
+            'telefono_aval_2', 'direccion_aval_2', 'curp_aval_2', 'parentesco_aval_2', 
             'curp_aval', 'parentesco_aval', 'activo','garantia_descripcion',
             'total_penalizaciones',"nombre_sujeto", 'tipo_display','folio_pagare',
         ]
+
     def validate(self, data):
-        """
-        Validación: Si el préstamo supera los $7,500, el segundo aval es obligatorio.
-        """
         monto = data.get('monto_capital')
         cliente = data.get('cliente')
-        # Extraemos la bandera de urgencia que enviaremos desde el Front
-        es_urgente = self.context.get('request').data.get('es_urgente', False)
+        request = self.context.get('request')
+        es_urgente = request.data.get('es_urgente', False) if request else False
         
-        # 1. VALIDACIÓN DE DEUDA PREVIA (Solo si no es urgente)
+        # 1. VALIDACIÓN DE DEUDA PREVIA (CORREGIDA PARA EVITAR ERROR 500)
         if cliente and not es_urgente:
-            # Asumiendo que tu modelo Cliente tiene saldo_actual o un método similar
-            if cliente.saldo_actual > 0:
+            # Calculamos el saldo real sumando préstamos activos
+            prestamos_activos = cliente.prestamos.filter(activo=True)
+            total_deuda = 0
+            for p in prestamos_activos:
+                pagado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+                total_deuda += (float(p.monto_total_pagar) - float(pagado))
+
+            if total_deuda > 0.01: # Si debe más de 1 centavo
                 raise serializers.ValidationError({
-                    "error": f"El cliente {cliente.nombre} tiene una deuda activa de ${cliente.saldo_actual}. Active el modo urgente para permitir un segundo préstamo."
+                    "error": f"El cliente {cliente.nombre} tiene una deuda activa de ${total_deuda:,.2f}. Active el modo urgente para permitir otro préstamo."
                 })
         
-        
-        # 2. VALIDACIÓN DE SEGUNDO AVAL (Esta se queda igual)
+        # 2. VALIDACIÓN DE SEGUNDO AVAL
         if monto and monto > 7500:
-            # Verificamos que los campos esenciales del segundo aval no estén vacíos
             if not data.get('nombre_aval_2') or not data.get('curp_aval_2'):
                 raise serializers.ValidationError({
-                    "nombre_aval_2": "Para préstamos mayores a $7,500 es obligatorio registrar un segundo aval con nombre y CURP."
+                    "nombre_aval_2": "Para préstamos mayores a $7,500 es obligatorio el segundo aval."
                 })
         return data
+
     def get_total_penalizaciones(self, obj):
         return obj.penalizaciones.filter(activa=True).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
 
@@ -322,7 +325,14 @@ class DirectorioHibridoSerializer(serializers.Serializer):
         return obj.nombre if hasattr(obj, 'nombre') else obj.nombre_grupo
 
     def get_saldo_actual(self, obj):
-        return getattr(obj, 'saldo_actual', 0.0)
+        # Esta es la parte que arregla lo de Luis Enrique
+        total = 0.0
+        if hasattr(obj, 'prestamos'):
+            p_activos = obj.prestamos.filter(activo=True)
+            for p in p_activos:
+                pagado = p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0
+                total += (float(p.monto_total_pagar) - float(pagado))
+        return round(total, 2)
 
     def get_total_penalizaciones(self, obj):
         return getattr(obj, 'total_penalizaciones', 0.0)
