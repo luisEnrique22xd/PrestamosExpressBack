@@ -422,7 +422,7 @@ def condonar_mora(request, pk):
             registrar_log(
                 request.user, 
                 "CONDONACION_MORA", 
-                f"Perdonados ${penalizacion.monto_penalizado} al préstamo #{prestamo.id}. Nuevo total: ${prestamo.monto_total_pagar}"
+                f"Condonados ${penalizacion.monto_penalizado} al préstamo #{prestamo.id}. Nuevo total: ${prestamo.monto_total_pagar}"
             )
             
             return Response({
