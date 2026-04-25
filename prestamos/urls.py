@@ -17,5 +17,6 @@ urlpatterns = [
     path('prestamos/cartera-vencida/', cartera_vencida_hibrida, name='cartera-vencida'),
     path('proximo-folio/', obtener_proximo_folio, name='proximo-folio'),
     path('penalizaciones/<int:pk>/condonar/', views.condonar_mora, name='condonar-mora'),
+    path('reporte-flujo-efectivo/', views.reporte_flujo_efectivo, name='reporte_flujo_efectivo'),
     
 ]
