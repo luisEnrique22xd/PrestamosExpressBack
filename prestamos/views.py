@@ -617,3 +617,48 @@ def cartera_vencida_hibrida(request):
 
     data_cartera.sort(key=lambda x: x['dias_atraso'], reverse=True)
     return Response(data_cartera)
+
+@api_view(['GET'])
+def reporte_flujo_efectivo(request):
+    periodo = request.query_params.get('periodo', 'diario') # diario, semanal, mensual, anual
+    mexico_tz = pytz.timezone('America/Mexico_City')
+    hoy = timezone.now().astimezone(mexico_tz).date()
+
+    # Definir el inicio del rango
+    if periodo == 'semanal':
+        inicio = hoy - timedelta(days=hoy.weekday())
+    elif periodo == 'mensual':
+        inicio = hoy.replace(day=1)
+    elif periodo == 'anual':
+        inicio = hoy.replace(month=1, day=1)
+    else:
+        inicio = hoy
+
+    # 1. EGRESOS (Dinero que salió: Capital prestado)
+    egresos = Prestamo.objects.filter(
+        fecha_creacion__date__gte=inicio, 
+        fecha_creacion__date__lte=hoy
+    ).aggregate(total=Sum('monto_capital'))['total'] or 0
+
+    # 2. INGRESOS (Dinero que entró: Abonos + Penalizaciones)
+    ingresos_abonos = Abono.objects.filter(
+        fecha_pago__gte=inicio, 
+        fecha_pago__lte=hoy
+    ).aggregate(total=Sum('monto'))['total'] or 0
+
+    ingresos_moras = Penalizacion.objects.filter(
+        fecha_aplicacion__gte=inicio, 
+        fecha_aplicacion__lte=hoy,
+        activa=False # Asumimos que si no está activa es porque se pagó
+    ).aggregate(total=Sum('monto_penalizado'))['total'] or 0
+
+    total_ingresos = float(ingresos_abonos) + float(ingresos_moras)
+
+    return Response({
+        "periodo": periodo,
+        "desde": inicio,
+        "hasta": hoy,
+        "colocacion_capital": float(egresos),
+        "recuperacion_total": total_ingresos,
+        "balance_neto": total_ingresos - float(egresos)
+    })
