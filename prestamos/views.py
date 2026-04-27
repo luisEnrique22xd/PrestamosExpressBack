@@ -114,6 +114,8 @@ def estadisticas_globales(request):
         {"label": "$3001-5000", "min": 3001, "max": 5000},
         {"label": "$5001-7500", "min": 5001, "max": 7500},
         {"label": "$7501-10000", "min": 7501, "max": 10000},
+        {"label": "$10001-12500", "min": 10001, "max": 12500},
+        {"label": "$12501-15000", "min": 12501, "max": 15000},
     ]
 
     # Traemos préstamos con sus abonos sumados para calcular el saldo en calle real
