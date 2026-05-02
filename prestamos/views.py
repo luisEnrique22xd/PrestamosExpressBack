@@ -667,22 +667,3 @@ def reporte_flujo_efectivo(request):
         "balance_neto": total_ingresos - float(egresos)
     })
 # views.py
-from django.contrib.auth.models import User
-from rest_framework import status, permissions
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
-class RegistrarTrabajadorView(APIView):
-    permission_classes = [permissions.IsAdminUser] # Solo Admins
-
-    def post(self, request):
-        username = request.data.get('username')
-        password = request.data.get('password')
-        email = request.data.get('email')
-        
-        if User.objects.filter(username=username).exists():
-            return Response({"error": "El usuario ya existe"}, status=status.HTTP_400_BAD_REQUEST)
-            
-        user = User.objects.create_user(username=username, email=email, password=password)
-        # Puedes asignar roles específicos aquí si usas grupos o perfiles
-        return Response({"msg": "Trabajador registrado con éxito"}, status=status.HTTP_201_CREATED)
