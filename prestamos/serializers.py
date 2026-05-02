@@ -117,8 +117,8 @@ class ClienteSerializer(serializers.ModelSerializer):
     total_penalizaciones = serializers.SerializerMethodField()
     id_mora_activa = serializers.SerializerMethodField()
     tiene_moras_activas = serializers.SerializerMethodField()
-    # 🔥 Agregamos el campo que necesita el Front para las tarjetas
     prestamos_activos = serializers.SerializerMethodField()
+    conteo_historico_penalizaciones = serializers.SerializerMethodField()
 
     class Meta:
         model = Cliente
@@ -127,7 +127,7 @@ class ClienteSerializer(serializers.ModelSerializer):
             'datos_ultimo_aval','progreso_pagos', 'historial_grafico', 
             'ultimo_prestamo_id','tiene_prestamo_activo','saldo_actual',
             'numero_prestamos','total_penalizaciones', 'id_mora_activa',
-            'tiene_moras_activas', 'prestamos_activos'
+            'tiene_moras_activas', 'prestamos_activos','conteo_historico_penalizaciones'
         ]
 
     def get_prestamos_activos(self, obj):
@@ -219,6 +219,12 @@ class ClienteSerializer(serializers.ModelSerializer):
 
     def get_tiene_moras_activas(self, obj):
         return obj.prestamos.filter(activo=True, penalizaciones__activa=True).exists()
+    def get_conteo_historico_penalizaciones(self, obj):
+        # Cuenta todas las penalizaciones que ha tenido en toda su historia
+        # No importa si ya las pagó o se las condonaron, esto mide su "comportamiento"
+        return obj.prestamos.aggregate(
+            total=models.Count('penalizaciones')
+        )['total'] or 0
 # 2. SERIALIZER DE PRÉSTAMOS
 class PrestamoSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.ReadOnlyField(source='cliente.nombre')
