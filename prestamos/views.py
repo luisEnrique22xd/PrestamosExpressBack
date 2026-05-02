@@ -373,6 +373,7 @@ class CalendarioPagosView(APIView):
                     if fecha_pago.month == mes and fecha_pago.year == anio:
                         # Verificar si ya existe un abono para esta cuota específica
                         ya_pagado = p.abonos.filter(semana_numero=i).exists()
+                        tiene_mora = p.penalizaciones.filter(activa=True).exists()
                         
                         nombre_sujeto = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else "N/A")
                         id_sujeto = p.cliente.id if p.cliente else (p.grupo.id if p.grupo else 0)
@@ -388,6 +389,7 @@ class CalendarioPagosView(APIView):
                             "fecha": fecha_pago.strftime("%Y-%m-%d"),
                             "monto": round(p.monto_total_pagar / p.cuotas, 2),
                             "estatus": "pagado" if ya_pagado else ("vencido" if fecha_pago < hoy else "pendiente"),
+                            "con_penalizacion": tiene_mora,
                             "tel": telefono_contacto
                         })
             
