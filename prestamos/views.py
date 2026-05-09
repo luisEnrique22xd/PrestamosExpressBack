@@ -667,3 +667,25 @@ def reporte_flujo_efectivo(request):
         "balance_neto": total_ingresos - float(egresos)
     })
 # views.py
+
+# views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Cliente # O Préstamo, según dónde guardes el aval
+
+class ActualizarAvalView(APIView):
+    def patch(self, request, pk):
+        try:
+            cliente = Cliente.objects.get(pk=pk)
+            
+            # Extraemos los datos que vienen del modal de Next.js
+            cliente.nombre_aval = request.data.get('nombre_aval', cliente.nombre_aval)
+            cliente.telefono_aval = request.data.get('telefono_aval', cliente.telefono_aval)
+            cliente.direccion_aval = request.data.get('direccion_aval', cliente.direccion_aval)
+            
+            cliente.save()
+            
+            return Response({"msg": "Aval actualizado con éxito"}, status=status.HTTP_200_OK)
+        except Cliente.DoesNotExist:
+            return Response({"error": "Cliente no encontrado"}, status=status.HTTP_404_NOT_FOUND)

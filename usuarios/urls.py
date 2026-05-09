@@ -19,4 +19,5 @@ urlpatterns = [
     path('perfil/cambiar-password/', views.cambiar_password, name='cambiar_password'),
     path('backup/', export_backup, name='backup-datos'),
     path('logs/', ListaLogsView.as_view(), name='lista-logs'),
-path('registrar-trabajador/', views.RegistrarTrabajadorView.as_view(), name='registrar_trabajador'),]
+    path('registrar-trabajador/', views.RegistrarTrabajadorView.as_view(), name='registrar_trabajador'),
+]
