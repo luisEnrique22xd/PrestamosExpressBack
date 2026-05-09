@@ -668,24 +668,35 @@ def reporte_flujo_efectivo(request):
     })
 # views.py
 
-# views.py
+# prestamos/views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Cliente # O Préstamo, según dónde guardes el aval
+from .models import Cliente, Prestamo
 
 class ActualizarAvalView(APIView):
     def patch(self, request, pk):
         try:
-            cliente = Cliente.objects.get(pk=pk)
+            # 1. Buscamos el último préstamo activo de este cliente
+            # (Ya que es ahí donde guardas nombre_aval, telefono_aval, etc.)
+            prestamo = Prestamo.objects.filter(cliente_id=pk, activo=True).order_by('-fecha_creacion').first()
             
-            # Extraemos los datos que vienen del modal de Next.js
-            cliente.nombre_aval = request.data.get('nombre_aval', cliente.nombre_aval)
-            cliente.telefono_aval = request.data.get('telefono_aval', cliente.telefono_aval)
-            cliente.direccion_aval = request.data.get('direccion_aval', cliente.direccion_aval)
+            if not prestamo:
+                return Response({"error": "No se encontró un préstamo activo para actualizar el aval."}, 
+                                status=status.HTTP_404_NOT_FOUND)
+
+            # 2. Actualizamos los campos usando los nombres exactos de TU modelo 'Prestamo'
+            prestamo.nombre_aval = request.data.get('nombre_aval', prestamo.nombre_aval)
+            prestamo.telefono_aval = request.data.get('telefono_aval', prestamo.telefono_aval)
+            prestamo.direccion_aval = request.data.get('direccion_aval', prestamo.direccion_aval)
             
-            cliente.save()
+            prestamo.save()
             
+            # 3. Opcional: Registrar el movimiento en tu log
+            # registrar_log(request.user, "ACTUALIZACION", f"Aval de Préstamo #{prestamo.id} editado")
+
             return Response({"msg": "Aval actualizado con éxito"}, status=status.HTTP_200_OK)
-        except Cliente.DoesNotExist:
-            return Response({"error": "Cliente no encontrado"}, status=status.HTTP_404_NOT_FOUND)
+
+        except Exception as e:
+            print(f"Error en ActualizarAvalView: {str(e)}") # Esto saldrá en Railway Logs
+            return Response({"error": f"Error interno: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
