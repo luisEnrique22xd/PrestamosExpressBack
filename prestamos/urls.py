@@ -1,7 +1,7 @@
 from django.urls import path
 
 from prestamos.views import obtener_proximo_folio
-from .views import CalendarioPagosView, ClienteDetailView, ClienteListCreateView, EstadisticasDinamicasView, PrestamoListCreateView, RegistrarAbonoView, cartera_vencida_hibrida, detalle_grupo, directorio_hibrido, estadisticas_globales
+from .views import ActualizarAvalView, CalendarioPagosView, ClienteDetailView, ClienteListCreateView, EstadisticasDinamicasView, PrestamoListCreateView, RegistrarAbonoView, cartera_vencida_hibrida, detalle_grupo, directorio_hibrido, estadisticas_globales
 from prestamos import views
 
 urlpatterns = [
