@@ -197,48 +197,26 @@ def estadisticas_globales(request):
 from django.db.models import Sum, Q, F, FloatField, ExpressionWrapper
 from datetime import datetime, timedelta
 
+# prestamos/views.py
+from django.db.models import Sum, Q, F
+from datetime import datetime
+import pytz
+
 @api_view(['GET'])
 def reportes_detallados(request):
-    # 1. Obtener parámetros de fecha del Frontend
-    fecha_inicio_str = request.query_params.get('inicio')
-    fecha_fin_str = request.query_params.get('fin')
-    
+    inicio_str = request.query_params.get('inicio')
+    fin_str = request.query_params.get('fin')
     mexico_tz = pytz.timezone('America/Mexico_City')
     
-    # Si no vienen fechas, por defecto usamos el mes actual
-    if fecha_inicio_str and fecha_fin_str:
-        f_inicio = datetime.strptime(fecha_inicio_str, '%Y-%m-%d').date()
-        f_fin = datetime.strptime(fecha_fin_str, '%Y-%m-%d').date()
+    if inicio_str and fin_str:
+        f_inicio = datetime.strptime(inicio_str, '%Y-%m-%d').date()
+        f_fin = datetime.strptime(fin_str, '%Y-%m-%d').date()
     else:
-        f_fin = timezone.now().astimezone(mexico_tz).date()
-        f_inicio = f_fin.replace(day=1) # Primero del mes
+        hoy = timezone.now().astimezone(mexico_tz).date()
+        f_inicio = hoy
+        f_fin = hoy
 
-    # 2. Obtener Abonos en ese rango (Historial de Cobranza)
-    # Agrupamos por día para el desglose que pidió Alexander
-    abonos_periodo = Abono.objects.filter(
-        fecha_pago__range=[f_inicio, f_fin]
-    ).values('fecha_pago').annotate(
-        total_cobrado=Sum('monto'),
-        # Estimación de capital vs interés (basado en la tasa del préstamo)
-        # Nota: Aquí asumo un cálculo proporcional simple para el reporte rápido
-    ).order_by('-fecha_pago')
-
-    historial_desglose = []
-    for a in abonos_periodo:
-        total = float(a['total_cobrado'])
-        # Calculamos interés devengado (aprox 20% si no tienes el campo exacto por abono)
-        # O puedes cruzarlo con la tasa del préstamo. Aquí lo haremos dinámico:
-        interes_estimado = total * 0.20 
-        capital_estimado = total - interes_estimado
-        
-        historial_desglose.append({
-            "name": a['fecha_pago'].strftime('%d/%m/%Y'),
-            "capital": round(capital_estimado, 2),
-            "interes": round(interes_estimado, 2),
-            "total": round(total, 2)
-        })
-
-    # 3. Rangos de Inversión (Clientes filtrados por préstamos creados en ese periodo)
+    # --- TABLA 1: RANGOS ---
     definicion_rangos = [
         {"label": "500-1500", "min": 500, "max": 1500},
         {"label": "1501-3000", "min": 1501, "max": 3000},
@@ -249,32 +227,53 @@ def reportes_detallados(request):
         {"label": "12501-15000", "min": 12501, "max": 15000},
     ]
 
-    # Préstamos iniciados en este periodo
-    prestamos_periodo = Prestamo.objects.filter(
-        fecha_inicio__date__range=[f_inicio, f_fin]
-    )
+    prestamos_periodo = Prestamo.objects.filter(fecha_inicio__date__range=[f_inicio, f_fin])
+    rangos_resultado = []
 
-    rangos_data = []
     for r in definicion_rangos:
-        # Clientes en este rango
         p_en_rango = prestamos_periodo.filter(monto_capital__range=[r['min'], r['max']])
         
-        capital_r = p_en_rango.aggregate(Sum('monto_capital'))['monto_capital__sum'] or 0
-        total_p_r = p_en_rango.aggregate(Sum('monto_total_pagar'))['monto_total_pagar__sum'] or 0
-        interes_r = total_p_r - capital_r
+        # Obtener nombres de clientes y grupos
+        nombres = list(p_en_rango.values_list('cliente__nombre', flat=True))
+        nombres_g = list(p_en_rango.values_list('grupo__nombre_grupo', flat=True))
+        lista_final = [n for n in (nombres + nombres_g) if n]
 
-        rangos_data.append({
+        cap_r = p_en_rango.aggregate(Sum('monto_capital'))['monto_capital__sum'] or 0
+        tot_r = p_en_rango.aggregate(Sum('monto_total_pagar'))['monto_total_pagar__sum'] or 0
+        int_r = tot_r - cap_r
+
+        rangos_resultado.append({
             "rango": r["label"],
-            "capital": float(capital_r),
-            "interes": float(interes_r),
-            "total": float(total_p_r),
-            "cant": p_en_rango.count()
+            "capital": float(cap_r),
+            "interes": float(int_r),
+            "total": float(tot_r),
+            "cant": p_en_rango.count(),
+            "clientes": ", ".join(lista_final)
+        })
+
+    # --- TABLA 2: HISTORIAL COBRANZA ---
+    abonos_periodo = Abono.objects.filter(
+        fecha_pago__range=[f_inicio, f_fin]
+    ).values('fecha_pago').annotate(total_dia=Sum('monto')).order_by('fecha_pago')
+
+    historial_data = []
+    for ab in abonos_periodo:
+        total = float(ab['total_dia'])
+        # Cálculo estimado (proporcional al 20%)
+        cap_est = total / 1.2
+        int_est = total - cap_est
+
+        historial_data.append({
+            "fecha": ab['fecha_pago'].strftime('%d/%m/%Y'),
+            "capital": round(cap_est, 2),
+            "interes": round(int_est, 2),
+            "total": round(total, 2)
         })
 
     return Response({
-        "periodo": f"{f_inicio} al {f_fin}",
-        "rangos": rangos_data,
-        "historial": historial_desglose
+        "info": f"Periodo: {f_inicio} a {f_fin}",
+        "rangos": rangos_resultado,
+        "historial": historial_data
     })
 # ==============================
 # CLIENTES
