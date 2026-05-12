@@ -232,8 +232,10 @@ def reportes_detallados(request):
 
     for r in definicion_rangos:
         # Filtramos los préstamos que pertenecen a este rango de capital
-        p_en_rango = prestamos_periodo.filter(monto_capital__range=[r['min'], r['max']])
-        
+        p_en_rango = prestamos_periodo.filter(
+        monto_capital__gte=Decimal(str(r['min'])),
+        monto_capital__lte=Decimal(str(r['max']))
+        )        
         # Nombres de clientes y grupos para el detalle
         nombres_c = list(p_en_rango.filter(cliente__isnull=False).values_list('cliente__nombre', flat=True))
         nombres_g = list(p_en_rango.filter(grupo__isnull=False).values_list('grupo__nombre_grupo', flat=True))
