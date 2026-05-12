@@ -197,11 +197,6 @@ def estadisticas_globales(request):
 from django.db.models import Sum, Q, F, FloatField, ExpressionWrapper
 from datetime import datetime, timedelta
 
-# prestamos/views.py
-from django.db.models import Sum, Q, F
-from datetime import datetime
-import pytz
-
 @api_view(['GET'])
 def reportes_detallados(request):
     inicio_str = request.query_params.get('inicio')
@@ -216,7 +211,7 @@ def reportes_detallados(request):
         f_inicio = hoy
         f_fin = hoy
 
-    # --- TABLA 1: RANGOS ---
+    # --- TABLA 1: RANGOS (CORREGIDA) ---
     definicion_rangos = [
         {"label": "500-1500", "min": 500, "max": 1500},
         {"label": "1501-3000", "min": 1501, "max": 3000},
@@ -227,19 +222,31 @@ def reportes_detallados(request):
         {"label": "12501-15000", "min": 12501, "max": 15000},
     ]
 
-    prestamos_periodo = Prestamo.objects.filter(fecha_inicio__date__range=[f_inicio, f_fin])
+    # Filtramos los préstamos creados en el rango de fechas solicitado
+    # Solo préstamos individuales o grupales emitidos en este periodo
+    prestamos_periodo = Prestamo.objects.filter(
+        fecha_inicio__date__range=[f_inicio, f_fin]
+    )
+
     rangos_resultado = []
 
     for r in definicion_rangos:
+        # Filtramos los préstamos que pertenecen a este rango de capital
         p_en_rango = prestamos_periodo.filter(monto_capital__range=[r['min'], r['max']])
         
-        # Obtener nombres de clientes y grupos
-        nombres = list(p_en_rango.values_list('cliente__nombre', flat=True))
-        nombres_g = list(p_en_rango.values_list('grupo__nombre_grupo', flat=True))
-        lista_final = [n for n in (nombres + nombres_g) if n]
+        # Nombres de clientes y grupos para el detalle
+        nombres_c = list(p_en_rango.filter(cliente__isnull=False).values_list('cliente__nombre', flat=True))
+        nombres_g = list(p_en_rango.filter(grupo__isnull=False).values_list('grupo__nombre_grupo', flat=True))
+        lista_final = sorted(list(set([n for n in (nombres_c + nombres_g) if n])))
 
-        cap_r = p_en_rango.aggregate(Sum('monto_capital'))['monto_capital__sum'] or 0
-        tot_r = p_en_rango.aggregate(Sum('monto_total_pagar'))['monto_total_pagar__sum'] or 0
+        # SUMATORIAS REALES
+        # Sumamos el capital inicial de cada préstamo único en este rango
+        cap_r = p_en_rango.aggregate(total=Sum('monto_capital'))['total'] or 0
+        
+        # Sumamos el total a pagar pactado (Capital + Intereses)
+        tot_r = p_en_rango.aggregate(total=Sum('monto_total_pagar'))['total'] or 0
+        
+        # El interés devengado es la ganancia pactada en este periodo
         int_r = tot_r - cap_r
 
         rangos_resultado.append({
@@ -251,27 +258,31 @@ def reportes_detallados(request):
             "clientes": ", ".join(lista_final)
         })
 
-    # --- TABLA 2: HISTORIAL COBRANZA ---
+    # --- TABLA 2: HISTORIAL COBRANZA (DESGLOSE) ---
+    # Obtenemos los abonos realizados EN las fechas seleccionadas
     abonos_periodo = Abono.objects.filter(
         fecha_pago__range=[f_inicio, f_fin]
     ).values('fecha_pago').annotate(total_dia=Sum('monto')).order_by('fecha_pago')
 
     historial_data = []
     for ab in abonos_periodo:
-        total = float(ab['total_dia'])
-        # Cálculo estimado (proporcional al 20%)
-        cap_est = total / 1.2
-        int_est = total - cap_est
+        total_dia = float(ab['total_dia'])
+        
+        # Para el reporte de cobranza, Alexander quiere ver cuánto de ese dinero fue capital 
+        # y cuánto interés. Usamos una proporción basada en la tasa promedio (aprox 20% de interés)
+        # O podrías calcularlo exacto si el modelo Abono tuviera desglose.
+        int_estimado = total_dia - (total_dia / 1.2)
+        cap_estimado = total_dia - int_estimado
 
         historial_data.append({
             "fecha": ab['fecha_pago'].strftime('%d/%m/%Y'),
-            "capital": round(cap_est, 2),
-            "interes": round(int_est, 2),
-            "total": round(total, 2)
+            "capital": round(cap_estimado, 2),
+            "interes": round(int_estimado, 2),
+            "total": round(total_dia, 2)
         })
 
     return Response({
-        "info": f"Periodo: {f_inicio} a {f_fin}",
+        "info": f"Periodo: {f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')}",
         "rangos": rangos_resultado,
         "historial": historial_data
     })
