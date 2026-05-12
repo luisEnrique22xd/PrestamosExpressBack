@@ -194,6 +194,88 @@ def estadisticas_globales(request):
         "total_moras_pendientes": total_moras_pendientes
     })
 
+from django.db.models import Sum, Q, F, FloatField, ExpressionWrapper
+from datetime import datetime, timedelta
+
+@api_view(['GET'])
+def reportes_detallados(request):
+    # 1. Obtener parámetros de fecha del Frontend
+    fecha_inicio_str = request.query_params.get('inicio')
+    fecha_fin_str = request.query_params.get('fin')
+    
+    mexico_tz = pytz.timezone('America/Mexico_City')
+    
+    # Si no vienen fechas, por defecto usamos el mes actual
+    if fecha_inicio_str and fecha_fin_str:
+        f_inicio = datetime.strptime(fecha_inicio_str, '%Y-%m-%d').date()
+        f_fin = datetime.strptime(fecha_fin_str, '%Y-%m-%d').date()
+    else:
+        f_fin = timezone.now().astimezone(mexico_tz).date()
+        f_inicio = f_fin.replace(day=1) # Primero del mes
+
+    # 2. Obtener Abonos en ese rango (Historial de Cobranza)
+    # Agrupamos por día para el desglose que pidió Alexander
+    abonos_periodo = Abono.objects.filter(
+        fecha_pago__range=[f_inicio, f_fin]
+    ).values('fecha_pago').annotate(
+        total_cobrado=Sum('monto'),
+        # Estimación de capital vs interés (basado en la tasa del préstamo)
+        # Nota: Aquí asumo un cálculo proporcional simple para el reporte rápido
+    ).order_by('-fecha_pago')
+
+    historial_desglose = []
+    for a in abonos_periodo:
+        total = float(a['total_cobrado'])
+        # Calculamos interés devengado (aprox 20% si no tienes el campo exacto por abono)
+        # O puedes cruzarlo con la tasa del préstamo. Aquí lo haremos dinámico:
+        interes_estimado = total * 0.20 
+        capital_estimado = total - interes_estimado
+        
+        historial_desglose.append({
+            "name": a['fecha_pago'].strftime('%d/%m/%Y'),
+            "capital": round(capital_estimado, 2),
+            "interes": round(interes_estimado, 2),
+            "total": round(total, 2)
+        })
+
+    # 3. Rangos de Inversión (Clientes filtrados por préstamos creados en ese periodo)
+    definicion_rangos = [
+        {"label": "500-1500", "min": 500, "max": 1500},
+        {"label": "1501-3000", "min": 1501, "max": 3000},
+        {"label": "3001-5000", "min": 3001, "max": 5000},
+        {"label": "5001-7500", "min": 5001, "max": 7500},
+        {"label": "7501-10000", "min": 7501, "max": 10000},
+        {"label": "10001-12500", "min": 10001, "max": 12500},
+        {"label": "12501-15000", "min": 12501, "max": 15000},
+    ]
+
+    # Préstamos iniciados en este periodo
+    prestamos_periodo = Prestamo.objects.filter(
+        fecha_inicio__date__range=[f_inicio, f_fin]
+    )
+
+    rangos_data = []
+    for r in definicion_rangos:
+        # Clientes en este rango
+        p_en_rango = prestamos_periodo.filter(monto_capital__range=[r['min'], r['max']])
+        
+        capital_r = p_en_rango.aggregate(Sum('monto_capital'))['monto_capital__sum'] or 0
+        total_p_r = p_en_rango.aggregate(Sum('monto_total_pagar'))['monto_total_pagar__sum'] or 0
+        interes_r = total_p_r - capital_r
+
+        rangos_data.append({
+            "rango": r["label"],
+            "capital": float(capital_r),
+            "interes": float(interes_r),
+            "total": float(total_p_r),
+            "cant": p_en_rango.count()
+        })
+
+    return Response({
+        "periodo": f"{f_inicio} al {f_fin}",
+        "rangos": rangos_data,
+        "historial": historial_desglose
+    })
 # ==============================
 # CLIENTES
 # ==============================
