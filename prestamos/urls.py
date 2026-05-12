@@ -19,6 +19,7 @@ urlpatterns = [
     path('proximo-folio/', obtener_proximo_folio, name='proximo-folio'),
     path('penalizaciones/<int:pk>/condonar/', views.condonar_mora, name='condonar-mora'),
     path('reporte-flujo-efectivo/', views.reporte_flujo_efectivo, name='reporte_flujo_efectivo'),
-    path('reporte-detallado/', views.reporte_detallado, name='reporte_detallado'),
+    path('reporte-detallado/', views.reportes_detallados, name='reporte_detallado'), # Agregaste la 's'
+
     
 ]
