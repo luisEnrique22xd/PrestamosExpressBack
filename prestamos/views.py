@@ -194,8 +194,14 @@ def estadisticas_globales(request):
         "total_moras_pendientes": total_moras_pendientes
     })
 
-from django.db.models import Sum, Q, F, FloatField, ExpressionWrapper
+# prestamos/views.py
 from datetime import datetime, timedelta
+from decimal import Decimal
+import pytz
+from django.db.models import Sum, Q
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import Prestamo, Abono
 
 @api_view(['GET'])
 def reportes_detallados(request):
@@ -211,7 +217,7 @@ def reportes_detallados(request):
         f_inicio = hoy
         f_fin = hoy
 
-    # --- TABLA 1: RANGOS (CORREGIDA) ---
+    # Definición de las cubetas de inversión por rango de Capital Inicial
     definicion_rangos = [
         {"label": "500-1500", "min": 500, "max": 1500},
         {"label": "1501-3000", "min": 1501, "max": 3000},
@@ -222,46 +228,79 @@ def reportes_detallados(request):
         {"label": "12501-15000", "min": 12501, "max": 15000},
     ]
 
-    # Filtramos los préstamos creados en el rango de fechas solicitado
-    # Solo préstamos individuales o grupales emitidos en este periodo
+    # Traemos todos los préstamos que estuvieron vigentes de alguna forma en este periodo
+    # (Ya sea porque iniciaron, o porque siguen corriendo durante estas fechas)
     prestamos_periodo = Prestamo.objects.filter(
-        fecha_inicio__date__range=[f_inicio, f_fin]
-    )
+        fecha_inicio__date__lte=f_fin
+    ).distinct()
 
     rangos_resultado = []
 
     for r in definicion_rangos:
-        # Filtramos los préstamos que pertenecen a este rango de capital
+        # Filtrar los préstamos que pertenecen a este rango según su CAPITAL INICIAL
         p_en_rango = prestamos_periodo.filter(
-        monto_capital__gte=Decimal(str(r['min'])),
-        monto_capital__lte=Decimal(str(r['max']))
-        )        
-        # Nombres de clientes y grupos para el detalle
+            monto_capital__gte=Decimal(str(r['min'])),
+            monto_capital__lte=Decimal(str(r['max']))
+        )
+        
+        # Nombres únicos de clientes o grupos en este rango
         nombres_c = list(p_en_rango.filter(cliente__isnull=False).values_list('cliente__nombre', flat=True))
         nombres_g = list(p_en_rango.filter(grupo__isnull=False).values_list('grupo__nombre_grupo', flat=True))
-        lista_final = sorted(list(set([n for n in (nombres_c + nombres_g) if n])))
+        lista_nombres = sorted(list(set([n for n in (nombres_c + nombres_g) if n])))
 
-        # SUMATORIAS REALES
-        # Sumamos el capital inicial de cada préstamo único en este rango
-        cap_r = p_en_rango.aggregate(total=Sum('monto_capital'))['total'] or 0
-        
-        # Sumamos el total a pagar pactado (Capital + Intereses)
-        tot_r = p_en_rango.aggregate(total=Sum('monto_total_pagar'))['total'] or 0
-        
-        # El interés devengado es la ganancia pactada en este periodo
-        int_r = tot_r - cap_r
+        cap_total_rango = 0.0
+        int_devengado_rango = 0.0
+        total_cobrado_rango = 0.0
+        conteo_prestamos = 0
+
+        for p in p_en_rango:
+            f_inicio_p = p.fecha_inicio.astimezone(mexico_tz).date() if hasattr(p.fecha_inicio, 'astimezone') else p.fecha_inicio
+            
+            # 1. Calcular cuántos días dura el préstamo en total según su modalidad
+            modalidad_upper = p.modalidad.upper() if p.modalidad else 'S'
+            if 'S' in modalidad_upper or 'SEMANAL' in modalidad_upper:
+                dias_por_cuota = 7
+            elif 'Q' in modalidad_upper or 'QUINCENAL' in modalidad_upper:
+                dias_por_cuota = 15
+            else:
+                dias_por_cuota = 30
+                
+            dias_totales_credito = p.cuotas * dias_por_cuota
+            f_vencimiento_p = f_inicio_p + timedelta(days=dias_totales_credito)
+
+            # 2. Calcular la intersección de fechas: ¿Qué días del préstamo caen dentro del reporte?
+            inicio_interseccion = max(f_inicio_p, f_inicio)
+            fin_interseccion = min(f_vencimiento_p, f_fin)
+            
+            dias_en_reporte = (fin_interseccion - inicio_interseccion).days + 1
+
+            # Si el préstamo intersecta con el periodo del reporte, procesamos sus montos
+            if dias_en_reporte > 0:
+                conteo_prestamos += 1
+                
+                # Montos base del contrato
+                cap_inicial = float(p.monto_capital)
+                int_total = float(p.monto_total_pagar) - cap_inicial
+                
+                # Cálculo proporcional por día
+                interes_por_dia = int_total / (dias_totales_credito if dias_totales_credito > 0 else 1)
+                capital_por_dia = cap_inicial / (dias_totales_credito if dias_totales_credito > 0 else 1)
+
+                # Sumamos la parte proporcional que le corresponde a este rango de fechas
+                cap_total_rango += (capital_por_dia * dias_en_reporte)
+                int_devengado_rango += (interes_por_dia * dias_en_reporte)
+                total_cobrado_rango += ((capital_por_dia + interes_por_dia) * dias_en_reporte)
 
         rangos_resultado.append({
             "rango": r["label"],
-            "capital": float(cap_r),
-            "interes": float(int_r),
-            "total": float(tot_r),
-            "cant": p_en_rango.count(),
-            "clientes": ", ".join(lista_final)
+            "capital": round(cap_total_rango, 2),
+            "interes": round(int_devengado_rango, 2),
+            "total": round(total_cobrado_rango, 2),
+            "cant": conteo_prestamos,
+            "clientes": ", ".join(lista_nombres) if lista_nombres else "0 préstamos"
         })
 
-    # --- TABLA 2: HISTORIAL COBRANZA (DESGLOSE) ---
-    # Obtenemos los abonos realizados EN las fechas seleccionadas
+    # --- TABLA 2: HISTORIAL COBRANZA (DESGLOSE REAL DIARIO) ---
     abonos_periodo = Abono.objects.filter(
         fecha_pago__range=[f_inicio, f_fin]
     ).values('fecha_pago').annotate(total_dia=Sum('monto')).order_by('fecha_pago')
@@ -269,10 +308,6 @@ def reportes_detallados(request):
     historial_data = []
     for ab in abonos_periodo:
         total_dia = float(ab['total_dia'])
-        
-        # Para el reporte de cobranza, Alexander quiere ver cuánto de ese dinero fue capital 
-        # y cuánto interés. Usamos una proporción basada en la tasa promedio (aprox 20% de interés)
-        # O podrías calcularlo exacto si el modelo Abono tuviera desglose.
         int_estimado = total_dia - (total_dia / 1.2)
         cap_estimado = total_dia - int_estimado
 
@@ -284,7 +319,7 @@ def reportes_detallados(request):
         })
 
     return Response({
-        "info": f"Periodo: {f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')}",
+        "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')}",
         "rangos": rangos_resultado,
         "historial": historial_data
     })
