@@ -324,7 +324,8 @@ class DirectorioHibridoSerializer(serializers.Serializer):
                 "cuotas": p.cuotas,
                 "modalidad": p.get_modalidad_display(),
                 "saldo_restante": float(p.monto_total_pagar) - float(p.abonos.aggregate(Sum('monto'))['monto__sum'] or 0),
-                "aval": p.nombre_aval
+                "aval": p.nombre_aval,
+                "fecha_inicio": p.fecha_inicio.strftime("%Y-%m-%d") if p.fecha_inicio else None
             } for p in qs]
         return []
 
