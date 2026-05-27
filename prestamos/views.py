@@ -228,8 +228,7 @@ def reportes_detallados(request):
         {"label": "12501-15000", "min": 12501, "max": 15000},
     ]
 
-    # Traemos los préstamos que intersectan con el rango del reporte
-    # (Que hayan iniciado antes o durante el fin del reporte)
+    # Traemos los préstamos que tienen relevancia en el tiempo
     prestamos_periodo = Prestamo.objects.filter(
         fecha_inicio__date__lte=f_fin
     ).distinct()
@@ -256,7 +255,17 @@ def reportes_detallados(request):
         for p in p_en_rango:
             f_inicio_p = p.fecha_inicio.astimezone(mexico_tz).date() if hasattr(p.fecha_inicio, 'astimezone') else p.fecha_inicio
             
-            # Calcular duración total del crédito según su modalidad
+            # --- 1. LÓGICA DE CAPITAL INICIAL COMPLETO ---
+            # El capital inicial SOLO se suma si el préstamo empezó dentro de las fechas solicitadas
+            cap_inicial_p = 0.0
+            prestamo_contado = False
+            if f_inicio <= f_inicio_p <= f_fin:
+                cap_inicial_p = float(p.monto_capital)
+                conteo_prestamos += 1
+                prestamo_contado = True
+
+            # --- 2. LÓGICA DE INTERÉS POR CUOTAS EXACTAS ---
+            # Identificamos el valor en días de cada cuota según la modalidad
             modalidad_upper = p.modalidad.upper() if p.modalidad else 'S'
             if 'S' in modalidad_upper or 'SEMANAL' in modalidad_upper:
                 dias_por_cuota = 7
@@ -264,33 +273,27 @@ def reportes_detallados(request):
                 dias_por_cuota = 15
             else:
                 dias_por_cuota = 30
-                
-            dias_totales_credito = p.cuotas * dias_por_cuota
-            f_vencimiento_p = f_inicio_p + timedelta(days=dias_totales_credito)
 
-            # --- 1. LÓGICA DE CAPITAL INICIAL COMPLETO ---
-            # El capital inicial SOLO se suma al reporte si la fecha de inicio cayó dentro del rango solicitado
-            cap_inicial_p = 0.0
-            if f_inicio <= f_inicio_p <= f_fin:
-                cap_inicial_p = float(p.monto_capital)
-                conteo_prestamos += 1
-
-            # --- 2. LÓGICA DE INTERÉS DINÁMICO ---
-            # El interés se calcula día por día cruzando las fechas
-            inicio_interseccion = max(f_inicio_p, f_inicio)
-            fin_interseccion = min(f_vencimiento_p, f_fin)
+            # Calculamos cuánto vale el interés de una sola cuota (Ej: 150 / 4 = 37.50)
+            int_total_credito = float(p.monto_total_pagar) - float(p.monto_capital)
+            interes_por_cuota = int_total_credito / (p.cuotas if p.cuotas > 0 else 1)
             
-            dias_en_reporte = (fin_interseccion - inicio_interseccion).days + 1
-
-            int_proporcional_p = 0.0
-            if dias_en_reporte > 0:
-                # Si no empezó dentro del rango pero genera interés aquí, lo contamos en el reporte
-                if cap_inicial_p == 0.0:
-                    conteo_prestamos += 1
+            cuotas_en_periodo = 0
+            
+            # Evaluamos la fecha de vencimiento de cada cuota
+            for i in range(1, p.cuotas + 1):
+                fecha_vencimiento_cuota = f_inicio_p + timedelta(days=dias_por_cuota * i)
                 
-                int_total_credito = float(p.monto_total_pagar) - float(p.monto_capital)
-                interes_por_dia = int_total_credito / (dias_totales_credito if dias_totales_credito > 0 else 1)
-                int_proporcional_p = interes_por_dia * dias_en_reporte
+                # Si la cuota vence dentro del rango del reporte, se devenga su interés
+                if f_inicio <= fecha_vencimiento_cuota <= f_fin:
+                    cuotas_en_periodo += 1
+
+            # Calculamos el interés acumulado por las cuotas que cayeron en el periodo
+            int_proporcional_p = interes_por_cuota * cuotas_en_periodo
+
+            # Si el préstamo generó intereses en este periodo pero no había sido contado por fecha de inicio, lo sumamos
+            if cuotas_en_periodo > 0 and not prestamo_contado:
+                conteo_prestamos += 1
 
             # Acumulamos los valores finales en el rango
             cap_total_rango += cap_inicial_p
