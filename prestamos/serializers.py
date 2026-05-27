@@ -128,6 +128,7 @@ class ClienteSerializer(serializers.ModelSerializer):
             'ultimo_prestamo_id','tiene_prestamo_activo','saldo_actual',
             'numero_prestamos','total_penalizaciones', 'id_mora_activa',
             'tiene_moras_activas', 'prestamos_activos','conteo_historico_penalizaciones'
+            
         ]
 
     def get_prestamos_activos(self, obj):
@@ -140,7 +141,8 @@ class ClienteSerializer(serializers.ModelSerializer):
             "capital": float(p.monto_capital),
             "cuotas": p.cuotas,
             "modalidad": p.get_modalidad_display(),
-            "aval": p.nombre_aval
+            "aval": p.nombre_aval,
+            "fecha_inicio": p.fecha_inicio.strftime("%Y-%m-%d") if p.fecha_inicio else None
         } for p in qs]
 
     def get_saldo_actual(self, obj):
