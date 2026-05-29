@@ -432,6 +432,7 @@ class RegistrarAbonoView(generics.CreateAPIView):
 
         # Registro de Log y Respuesta...
         sujeto = prestamo.grupo.nombre_grupo if prestamo.tipo == 'G' and prestamo.grupo else prestamo.cliente.nombre
+        registrar_log(self.request.user, "REGISTRO_ABONO", f"Abono registrado para el préstamo #{prestamo.id}")
         return Response({
             "id": abono.id,
             "monto": float(abono.monto),
@@ -442,6 +443,8 @@ class RegistrarAbonoView(generics.CreateAPIView):
             "fecha": abono.fecha_pago.strftime("%d/%m/%Y"),
             "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S")
         }, status=status.HTTP_201_CREATED)
+        
+    
 
 
 # ==============================
@@ -831,10 +834,37 @@ class ActualizarAvalView(APIView):
             prestamo.save()
             
             # 3. Opcional: Registrar el movimiento en tu log
-            # registrar_log(request.user, "ACTUALIZACION", f"Aval de Préstamo #{prestamo.id} editado")
+            registrar_log(request.user, "ACTUALIZACION", f"Aval de Préstamo #{prestamo.id} editado")
 
             return Response({"msg": "Aval actualizado con éxito"}, status=status.HTTP_200_OK)
 
         except Exception as e:
             print(f"Error en ActualizarAvalView: {str(e)}") # Esto saldrá en Railway Logs
             return Response({"error": f"Error interno: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+from datetime import datetime
+import pytz
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import Cliente
+
+@api_view(['GET'])
+def clientes_cumpleanos(request):
+    mexico_tz = pytz.timezone('America/Mexico_City')
+    hoy = datetime.now(mexico_tz).date()
+    
+    # Filtrar clientes que cumplen años en el mes actual
+    cumpleanos_mes = Cliente.objects.filter(
+        fecha_nacimiento__month=hoy.month
+    ).order_by('fecha_nacimiento__day')
+    
+    data = [{
+        "id": c.id,
+        "nombre": c.nombre,
+        "telefono": c.telefono,
+        "fecha_nacimiento": c.fecha_nacimiento.strftime('%Y-%m-%d') if c.fecha_nacimiento else None,
+        "dia": c.fecha_nacimiento.day if c.fecha_nacimiento else None,
+        "es_hoy": c.fecha_nacimiento.day == hoy.day and c.fecha_nacimiento.month == hoy.month if c.fecha_nacimiento else False
+    } for c in cumpleanos_mes]
+    
+    return Response(data)
