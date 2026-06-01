@@ -542,7 +542,7 @@ class CalendarioPagosView(APIView):
             return Response({"error": "Error interno al generar calendario"}, status=500)
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
-def condonar_mora(request, pk):
+def condonar_mora(self,request, pk):
     try:
         penalizacion = Penalizacion.objects.get(pk=pk)
         motivo = request.data.get('motivo')
@@ -564,11 +564,9 @@ def condonar_mora(request, pk):
             penalizacion.motivo_condonacion = motivo
             penalizacion.save()
             
-            registrar_log(
-                request.user, 
-                "CONDONACION_MORA", 
-                f"Condonados ${penalizacion.monto_penalizado} al préstamo #{prestamo.id}. Nuevo total: ${prestamo.monto_total_pagar}"
-            )
+            
+            registrar_log(self.request.user, "CONDONACION_MORA", f"Condonados ${penalizacion.monto_penalizado} al préstamo #{prestamo.id}. Nuevo total: ${prestamo.monto_total_pagar}")
+    
             
             return Response({
                 "message": "Condonada con éxito y saldo del préstamo actualizado",
