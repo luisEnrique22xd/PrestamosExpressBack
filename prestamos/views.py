@@ -542,41 +542,48 @@ class CalendarioPagosView(APIView):
             return Response({"error": "Error interno al generar calendario"}, status=500)
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
-def condonar_mora(self,request, pk):
+def condonar_mora(request, pk): # 💡 Nota: Quitamos 'self' si es una función con @api_view directa
     try:
-        penalizacion = Penalizacion.objects.get(pk=pk)
+        # 1. Localizar la penalización inicial que disparó la acción
+        penalizacion_origen = Penalizacion.objects.get(pk=pk)
         motivo = request.data.get('motivo')
         
         if not motivo or len(motivo) < 10: 
             return Response({"error": "Motivo inválido (mínimo 10 caracteres)"}, status=400)
         
-        if penalizacion.activa:
-            # 1. Obtener el préstamo asociado
-            prestamo = penalizacion.prestamo
+        prestamo = penalizacion_origen.prestamo
+        
+        # 2. Buscar TODAS las penalizaciones activas que tiene este préstamo acumuladas
+        moras_acumuladas = Penalizacion.objects.filter(prestamo=prestamo, activa=True)
+        
+        if moras_acumuladas.exists():
+            # Calcular la suma total de todos los recargos acumulados a perdonar
+            total_monto_condonar = sum(mora.monto_penalizado for mora in moras_acumuladas)
             
-            # 2. RESTAR el monto de la mora del total a pagar del préstamo
-            # Esto es lo que faltaba para que el abono baje a $600
-            prestamo.monto_total_pagar -= penalizacion.monto_penalizado
+            # 3. RESTAR el gran total acumulado del saldo del préstamo
+            prestamo.monto_total_pagar -= total_monto_condonar
             prestamo.save()
             
-            # 3. Desactivar la penalización
-            penalizacion.activa = False
-            penalizacion.motivo_condonacion = motivo
-            penalizacion.save()
+            # 4. Desactivar y guardar la justificación en cada una de ellas
+            for mora in moras_acumuladas:
+                mora.activa = False
+                mora.motivo_condonacion = motivo
+                mora.save()
             
-            
-            registrar_log(self.request.user, "CONDONACION_MORA", f"Condonados ${penalizacion.monto_penalizado} al préstamo #{prestamo.id}. Nuevo total: ${prestamo.monto_total_pagar}")
-    
+            # 5. Registrar la acción en el Log (Cambiamos self.request.user por request.user)
+            registrar_log(request.user, "CONDONACION_MORA_GLOBAL", f"Condonado un acumulado de ${total_monto_condonar} al préstamo #{prestamo.id}. Nuevo total: ${prestamo.monto_total_pagar}")
             
             return Response({
-                "message": "Condonada con éxito y saldo del préstamo actualizado",
+                "message": "Todas las moras acumuladas fueron condonadas con éxito y el saldo fue actualizado",
+                "monto_condonado_total": total_monto_condonar,
                 "nuevo_total_prestamo": prestamo.monto_total_pagar
             })
             
-        return Response({"message": "Esta penalización ya no estaba activa"}, status=400)
+        return Response({"message": "Este préstamo no cuenta con penalizaciones activas en este momento"}, status=400)
+    except Penalizacion.DoesNotExist:
+        return Response({"error": "No se localizó el registro de la penalización especificada"}, status=404)
     except Exception as e: 
         return Response({"error": str(e)}, status=500)
-
 @api_view(['GET', 'POST'])
 def obtener_proximo_folio(request):
     contador, _ = ContadorFolio.objects.get_or_create(id=1, defaults={'numero_actual': 1})
