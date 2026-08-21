@@ -274,8 +274,13 @@ class PrestamoSerializer(serializers.ModelSerializer):
         return data
 
     def get_total_penalizaciones(self, obj):
-        return obj.penalizaciones.filter(activa=True).aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0
-
+        from django.db.models import Sum
+        # ✅ Filtramos únicamente las penalizaciones que sigan activas
+        res = obj.prestamos.filter(
+            activo=True, 
+            penalizaciones__activa=True
+        ).aggregate(total=Sum('penalizaciones__monto_penalizado'))
+        return float(res['total'] or 0)
     def get_nombre_sujeto(self, obj):
         if obj.tipo == 'G' and obj.grupo:
             return obj.grupo.nombre_grupo
