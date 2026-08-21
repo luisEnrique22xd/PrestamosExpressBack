@@ -56,9 +56,12 @@ class CarteraVencidaSerializer(serializers.Serializer):
         return round(total_vencido, 2)
 
     def get_total_penalizaciones(self, obj):
-        p = self._get_prestamo_activo(obj)
-        if not p: return 0
-        res = p.penalizaciones.filter(activa=True).aggregate(total=Sum('monto_penalizado'))
+        from django.db.models import Sum
+        # ✅ Filtro estricto por activa=True
+        res = obj.prestamos.filter(
+            activo=True, 
+            penalizaciones__activa=True
+        ).aggregate(total=Sum('penalizaciones__monto_penalizado'))
         return float(res['total'] or 0)
 
     def get_ultimo_pago(self, obj):
@@ -350,7 +353,13 @@ class DirectorioHibridoSerializer(serializers.Serializer):
         return round(total, 2)
 
     def get_total_penalizaciones(self, obj):
-        return getattr(obj, 'total_penalizaciones', 0.0)
+        from django.db.models import Sum
+        # ✅ Filtro estricto por activa=True
+        res = obj.prestamos.filter(
+            activo=True, 
+            penalizaciones__activa=True
+        ).aggregate(total=Sum('penalizaciones__monto_penalizado'))
+        return float(res['total'] or 0)
 
     def get_id_mora_activa(self, obj):
         return getattr(obj, 'id_mora_activa', None)

@@ -540,48 +540,55 @@ class CalendarioPagosView(APIView):
             # Esto nos dirá en los logs de Railway exactamente qué rompió
             print(f"ERROR EN CALENDARIO: {str(e)}")
             return Response({"error": "Error interno al generar calendario"}, status=500)
+from django.db import transaction
+
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
-def condonar_mora(request, pk): # 💡 Nota: Quitamos 'self' si es una función con @api_view directa
+def condonar_mora(request, pk):
     try:
-        # 1. Localizar la penalización inicial que disparó la acción
-        penalizacion_origen = Penalizacion.objects.get(pk=pk)
         motivo = request.data.get('motivo')
-        
         if not motivo or len(motivo) < 10: 
             return Response({"error": "Motivo inválido (mínimo 10 caracteres)"}, status=400)
         
-        prestamo = penalizacion_origen.prestamo
+        # 1. Buscar si pk corresponde a una penalización o directamente a un préstamo
+        penalizacion_origen = Penalizacion.objects.filter(pk=pk).first()
         
-        # 2. Buscar TODAS las penalizaciones activas que tiene este préstamo acumuladas
-        moras_acumuladas = Penalizacion.objects.filter(prestamo=prestamo, activa=True)
+        if penalizacion_origen:
+            prestamo = penalizacion_origen.prestamo
+        else:
+            prestamo = Prestamo.objects.filter(pk=pk).first()
+
+        if not prestamo:
+            return Response({"error": "No se localizó el préstamo o penalización especificada"}, status=404)
         
-        if moras_acumuladas.exists():
-            # Calcular la suma total de todos los recargos acumulados a perdonar
-            total_monto_condonar = sum(mora.monto_penalizado for mora in moras_acumuladas)
+        # 2. Obtener todas las penalizaciones activas de este préstamo
+        moras_activas = Penalizacion.objects.filter(prestamo=prestamo, activa=True)
+        
+        if not moras_activas.exists():
+            return Response({"message": "No hay penalizaciones activas pendientes en este préstamo"}, status=400)
+        
+        with transaction.atomic():
+            total_condonado = sum(mora.monto_penalizado for mora in moras_activas)
             
-            # 3. RESTAR el gran total acumulado del saldo del préstamo
-            prestamo.monto_total_pagar -= total_monto_condonar
+            # Descontar del saldo del préstamo
+            prestamo.monto_total_pagar -= total_condonado
             prestamo.save()
             
-            # 4. Desactivar y guardar la justificación en cada una de ellas
-            for mora in moras_acumuladas:
-                mora.activa = False
-                mora.motivo_condonacion = motivo
-                mora.save()
+            # Desactivar las moras
+            moras_activas.update(activa=False, motivo_condonacion=motivo)
             
-            # 5. Registrar la acción en el Log (Cambiamos self.request.user por request.user)
-            registrar_log(request.user, "CONDONACION_MORA_GLOBAL", f"Condonado un acumulado de ${total_monto_condonar} al préstamo #{prestamo.id}. Nuevo total: ${prestamo.monto_total_pagar}")
+            registrar_log(
+                request.user, 
+                "CONDONACION_MORA_GLOBAL", 
+                f"Condonado acumulado de ${total_condonado} al préstamo #{prestamo.id}."
+            )
             
-            return Response({
-                "message": "Todas las moras acumuladas fueron condonadas con éxito y el saldo fue actualizado",
-                "monto_condonado_total": total_monto_condonar,
-                "nuevo_total_prestamo": prestamo.monto_total_pagar
-            })
-            
-        return Response({"message": "Este préstamo no cuenta con penalizaciones activas en este momento"}, status=400)
-    except Penalizacion.DoesNotExist:
-        return Response({"error": "No se localizó el registro de la penalización especificada"}, status=404)
+        return Response({
+            "message": "Todas las moras activas fueron condonadas con éxito",
+            "monto_condonado_total": total_condonado,
+            "nuevo_total_prestamo": prestamo.monto_total_pagar
+        })
+        
     except Exception as e: 
         return Response({"error": str(e)}, status=500)
 @api_view(['GET', 'POST'])
