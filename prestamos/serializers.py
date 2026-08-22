@@ -212,9 +212,12 @@ class ClienteSerializer(serializers.ModelSerializer):
 
     def get_total_penalizaciones(self, obj):
         from django.db.models import Sum
-        res = obj.prestamos.filter(activo=True).aggregate(total=Sum('penalizaciones__monto_penalizado'))
+        # ✅ Filtro estricto para sumar solo las penalizaciones activas
+        res = obj.prestamos.filter(
+            activo=True, 
+            penalizaciones__activa=True
+        ).aggregate(total=Sum('penalizaciones__monto_penalizado'))
         return float(res['total'] or 0)
-
     def get_id_mora_activa(self, obj):
         p = obj.prestamos.filter(activo=True).last()
         if p:
