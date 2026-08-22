@@ -135,38 +135,33 @@ class ClienteSerializer(serializers.ModelSerializer):
             
         ]
 
-    from django.utils import timezone
-
-def get_prestamos_activos(self, obj):
-    qs = obj.prestamos.filter(activo=True).order_by('-id')
-    resultado = []
-    
-    for p in qs:
-        fecha_val = None
-        # 1. Priorizar fecha_creacion si existe
-        campo_fecha = getattr(p, 'fecha_creacion', None) or getattr(p, 'fecha_inicio', None)
+    def get_prestamos_activos(self, obj):
+        mexico_tz = pytz.timezone('America/Mexico_City')
+        qs = obj.prestamos.filter(activo=True).order_by('-fecha_creacion')
+        resultado = []
         
-        if campo_fecha:
-            # Si tiene zona horaria activa, convertir a hora local
-            if hasattr(campo_fecha, 'tzinfo') and campo_fecha.tzinfo is not None:
-                fecha_val = timezone.localtime(campo_fecha).strftime("%Y-%m-%d")
-            elif hasattr(campo_fecha, 'strftime'):
-                fecha_val = campo_fecha.strftime("%Y-%m-%d")
+        for p in qs:
+            # 1. Convertir la estampa DateTime a horario de México
+            fecha_dt = p.fecha_inicio or p.fecha_creacion
+            if fecha_dt and hasattr(fecha_dt, 'astimezone'):
+                fecha_str = fecha_dt.astimezone(mexico_tz).strftime("%Y-%m-%d")
+            elif fecha_dt:
+                fecha_str = str(fecha_dt).split(' ')[0].split('T')[0]
             else:
-                fecha_val = str(campo_fecha).split(' ')[0].split('T')[0]
+                fecha_str = None
 
-        resultado.append({
-            "id": p.id,
-            "folio": p.folio_pagare or 0,
-            "monto_total": float(p.monto_total_pagar),
-            "capital": float(p.monto_capital),
-            "cuotas": p.cuotas,
-            "modalidad": p.get_modalidad_display(),
-            "aval": p.nombre_aval,
-            "fecha_inicio": fecha_val
-        })
-        
-    return resultado
+            resultado.append({
+                "id": p.id,
+                "folio": p.folio_pagare or 0,
+                "monto_total": float(p.monto_total_pagar),
+                "capital": float(p.monto_capital),
+                "cuotas": p.cuotas,
+                "modalidad": p.get_modalidad_display(),
+                "aval": p.nombre_aval,
+                "fecha_inicio": fecha_str
+            })
+            
+        return resultado
 
     def get_saldo_actual(self, obj):
         from django.db.models import Sum
