@@ -146,7 +146,7 @@ class ClienteSerializer(serializers.ModelSerializer):
             "cuotas": p.cuotas,
             "modalidad": p.get_modalidad_display(),
             "aval": p.nombre_aval,
-            "fecha_inicio": p.fecha_inicio.strftime("%Y-%m-%d") if p.fecha_inicio else None
+            "fecha_inicio": timezone.localtime(p.fecha_creacion).strftime("%Y-%m-%d") if hasattr(p, 'fecha_creacion') and p.fecha_creacion else p.fecha_inicio.strftime("%Y-%m-%d")
         } for p in qs]
 
     def get_saldo_actual(self, obj):
