@@ -135,10 +135,27 @@ class ClienteSerializer(serializers.ModelSerializer):
             
         ]
 
-    def get_prestamos_activos(self, obj):
-        # Usamos related_name 'prestamos'
-        qs = obj.prestamos.filter(activo=True).order_by('-fecha_creacion')
-        return [{
+    from django.utils import timezone
+
+def get_prestamos_activos(self, obj):
+    qs = obj.prestamos.filter(activo=True).order_by('-id')
+    resultado = []
+    
+    for p in qs:
+        fecha_val = None
+        # 1. Priorizar fecha_creacion si existe
+        campo_fecha = getattr(p, 'fecha_creacion', None) or getattr(p, 'fecha_inicio', None)
+        
+        if campo_fecha:
+            # Si tiene zona horaria activa, convertir a hora local
+            if hasattr(campo_fecha, 'tzinfo') and campo_fecha.tzinfo is not None:
+                fecha_val = timezone.localtime(campo_fecha).strftime("%Y-%m-%d")
+            elif hasattr(campo_fecha, 'strftime'):
+                fecha_val = campo_fecha.strftime("%Y-%m-%d")
+            else:
+                fecha_val = str(campo_fecha).split(' ')[0].split('T')[0]
+
+        resultado.append({
             "id": p.id,
             "folio": p.folio_pagare or 0,
             "monto_total": float(p.monto_total_pagar),
@@ -146,8 +163,10 @@ class ClienteSerializer(serializers.ModelSerializer):
             "cuotas": p.cuotas,
             "modalidad": p.get_modalidad_display(),
             "aval": p.nombre_aval,
-            "fecha_inicio": timezone.localtime(p.fecha_creacion).strftime("%Y-%m-%d") if hasattr(p, 'fecha_creacion') and p.fecha_creacion else p.fecha_inicio.strftime("%Y-%m-%d")
-        } for p in qs]
+            "fecha_inicio": fecha_val
+        })
+        
+    return resultado
 
     def get_saldo_actual(self, obj):
         from django.db.models import Sum
