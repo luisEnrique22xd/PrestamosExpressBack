@@ -2,6 +2,7 @@ from datetime import timezone
 from decimal import Decimal
 from django.db import models
 from django.db.models import Sum
+import pytz
 from rest_framework import serializers
 from .models import Cliente, Penalizacion, Prestamo, Abono, Grupo
 
@@ -139,16 +140,14 @@ class ClienteSerializer(serializers.ModelSerializer):
         mexico_tz = pytz.timezone('America/Mexico_City')
         qs = obj.prestamos.filter(activo=True).order_by('-fecha_creacion')
         resultado = []
-        
         for p in qs:
-            # 1. Convertir la estampa DateTime a horario de México
-            fecha_dt = p.fecha_inicio or p.fecha_creacion
-            if fecha_dt and hasattr(fecha_dt, 'astimezone'):
-                fecha_str = fecha_dt.astimezone(mexico_tz).strftime("%Y-%m-%d")
-            elif fecha_dt:
-                fecha_str = str(fecha_dt).split(' ')[0].split('T')[0]
-            else:
-                fecha_str = None
+            fecha_val = None
+            f_obj = p.fecha_inicio or p.fecha_creacion
+            if f_obj:
+                try:
+                    fecha_val = f_obj.astimezone(mexico_tz).strftime("%Y-%m-%d")
+                except Exception:
+                    fecha_val = str(f_obj).split(' ')[0].split('T')[0]
 
             resultado.append({
                 "id": p.id,
@@ -158,9 +157,8 @@ class ClienteSerializer(serializers.ModelSerializer):
                 "cuotas": p.cuotas,
                 "modalidad": p.get_modalidad_display(),
                 "aval": p.nombre_aval,
-                "fecha_inicio": fecha_str
+                "fecha_inicio": fecha_val
             })
-            
         return resultado
 
     def get_saldo_actual(self, obj):
