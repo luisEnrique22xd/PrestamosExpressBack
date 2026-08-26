@@ -40,8 +40,6 @@ class RegisterView(generics.CreateAPIView):
 @permission_classes([IsAuthenticated])
 def perfil_usuario(request):
     user = request.user
-    abonos_recientes = Abono.objects.all().order_by('-id')[:30]
-    tickets_serializer = HistorialPagosSerializer(abonos_recientes, many=True)
     return Response({
         "id": user.id,
         "username": user.username,
@@ -55,8 +53,8 @@ from django.db.models import Q
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
-from .models import Abono
-from .serializers import HistorialPagosSerializer
+from prestamos.models import Abono
+from prestamos.serializers import HistorialPagosSerializer
 
 class PaginacionTickets(PageNumberPagination):
     page_size = 25
