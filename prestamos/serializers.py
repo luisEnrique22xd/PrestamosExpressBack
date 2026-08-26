@@ -414,13 +414,20 @@ class HistorialPagosSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Abono
-        fields = ['id', 'monto','fecha', 'hora', 'semana_numero', 'cliente', 'saldo_anterior', 'nuevo_saldo',]
+        fields = ['id', 'monto', 'fecha', 'hora', 'semana_numero', 'cliente', 'saldo_anterior', 'nuevo_saldo']
 
     def get_cliente(self, obj):
-        nombre = obj.prestamo.grupo.nombre_grupo if obj.prestamo.tipo == 'G' else obj.prestamo.cliente.nombre
-        return nombre.upper() # Así se ve parejo siempre
+        if not obj.prestamo:
+            return "SIN ASIGNAR"
+        if obj.prestamo.tipo == 'G' and obj.prestamo.grupo:
+            return obj.prestamo.grupo.nombre_grupo.upper()
+        if obj.prestamo.cliente:
+            return obj.prestamo.cliente.nombre.upper()
+        return "SIN NOMBRE"
+
     def get_saldo_anterior(self, obj):
-        # Saldo de capital justo antes de este abono
+        if not obj.prestamo:
+            return 0.0
         pagos_anteriores = Abono.objects.filter(
             prestamo=obj.prestamo, 
             id__lt=obj.id
@@ -428,5 +435,4 @@ class HistorialPagosSerializer(serializers.ModelSerializer):
         return float(obj.prestamo.monto_total_pagar - pagos_anteriores)
 
     def get_nuevo_saldo(self, obj):
-        # Simplemente restamos el abono actual al saldo anterior de capital
         return self.get_saldo_anterior(obj) - float(obj.monto)

@@ -49,9 +49,44 @@ def perfil_usuario(request):
         "last_name": user.last_name,
         "email": user.email,
         "puesto": "Administrador General" if user.is_superuser else "Cobrador",
-        "historial_global": tickets_serializer.data,
         "last_login": user.last_login.strftime('%I:%M %p') if user.last_login else "N/A"
     })
+from django.db.models import Q
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.pagination import PageNumberPagination
+from .models import Abono
+from .serializers import HistorialPagosSerializer
+
+class PaginacionTickets(PageNumberPagination):
+    page_size = 25
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def todos_los_tickets(request):
+    queryset = Abono.objects.select_related(
+        'prestamo__cliente',
+        'prestamo__grupo'
+    ).all().order_by('-id')
+
+    search = request.query_params.get('search', '').strip()
+    if search:
+        queryset = queryset.filter(
+            Q(prestamo__cliente__nombre__icontains=search) |
+            Q(prestamo__grupo__nombre_grupo__icontains=search)
+        )
+
+    fecha = request.query_params.get('fecha', '').strip()
+    if fecha:
+        queryset = queryset.filter(fecha_pago=fecha)
+
+    paginador = PaginacionTickets()
+    pagina = paginador.paginate_queryset(queryset, request)
+    serializer = HistorialPagosSerializer(pagina, many=True)
+    
+    return paginador.get_paginated_response(serializer.data)
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def actualizar_perfil(request):
