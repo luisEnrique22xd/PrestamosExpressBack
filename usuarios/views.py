@@ -133,21 +133,34 @@ def proximo_folio(request):
     return Response({
         "proximo_folio": max_folio + 1
     })
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAdminUser
+from rest_framework.response import Response
+from django.utils import timezone
+from prestamos.models import Penalizacion
+
 @api_view(['POST'])
+@permission_classes([IsAdminUser])
 def condonar_mora(request):
     mora_id = request.data.get('id_mora')
+    motivo = request.data.get('motivo', 'Condonación autorizada por administración')
+    
     try:
         mora = Penalizacion.objects.get(id=mora_id, activa=True)
-        prestamo = mora.prestamo
         
-        # Restamos la mora del total del préstamo
-        prestamo.monto_total_pagar -= mora.monto_penalizado
-        mora.activa = False # La "apagamos"
-        
+        # ✅ SOLO desactivamos la penalización y registramos la fecha/motivo
+        mora.activa = False
+        if hasattr(mora, 'motivo_condonacion'):
+            mora.motivo_condonacion = motivo
+        if hasattr(mora, 'fecha_condonacion'):
+            mora.fecha_condonacion = timezone.now()
+            
         mora.save()
-        prestamo.save()
         
-        return Response({"message": "Recargos condonados con éxito"})
+        return Response({
+            "message": "Recargo condonado con éxito",
+            "monto_condonado": float(mora.monto_penalizado)
+        })
     except Penalizacion.DoesNotExist:
         return Response({"error": "No hay recargos activos con ese ID"}, status=404)
 from rest_framework_simplejwt.views import TokenObtainPairView

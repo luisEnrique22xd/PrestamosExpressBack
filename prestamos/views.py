@@ -570,12 +570,13 @@ def condonar_mora(request, pk):
         with transaction.atomic():
             total_condonado = sum(mora.monto_penalizado for mora in moras_activas)
             
-            # Descontar del saldo del préstamo
-            prestamo.monto_total_pagar -= total_condonado
-            prestamo.save()
-            
-            # Desactivar las moras
-            moras_activas.update(activa=False, motivo_condonacion=motivo)
+            # ✅ SOLO desactivamos las moras y guardamos la justificación
+            # NO tocamos prestamo.monto_total_pagar
+            moras_activas.update(
+                activa=False, 
+                motivo_condonacion=motivo,
+                fecha_condonacion=timezone.now()
+            )
             
             registrar_log(
                 request.user, 
@@ -585,8 +586,8 @@ def condonar_mora(request, pk):
             
         return Response({
             "message": "Todas las moras activas fueron condonadas con éxito",
-            "monto_condonado_total": total_condonado,
-            "nuevo_total_prestamo": prestamo.monto_total_pagar
+            "monto_condonado_total": float(total_condonado),
+            "total_prestamo_pactado": float(prestamo.monto_total_pagar)
         })
         
     except Exception as e: 
