@@ -20,5 +20,5 @@ urlpatterns = [
     path('backup/', export_backup, name='backup-datos'),
     path('logs/', ListaLogsView.as_view(), name='lista-logs'),
     path('registrar-trabajador/', views.RegistrarTrabajadorView.as_view(), name='registrar_trabajador'),
-    path('api/tickets/', views.todos_los_tickets, name='todos_los_tickets'),
+    path('tickets/', views.todos_los_tickets, name='todos_los_tickets'),
 ]
