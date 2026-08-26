@@ -157,7 +157,8 @@ class ClienteSerializer(serializers.ModelSerializer):
                 "cuotas": p.cuotas,
                 "modalidad": p.get_modalidad_display(),
                 "aval": p.nombre_aval,
-                "fecha_inicio": fecha_val
+                "fecha_inicio": fecha_val,
+                "telefono_aval": p.telefono_aval or '',
             })
         return resultado
 
