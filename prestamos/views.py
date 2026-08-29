@@ -492,7 +492,6 @@ from .models import Prestamo
 FECHA_BASE_SEM1 = date(2025, 12, 29)
 
 def obtener_numero_semana(fecha_obj):
-    """Devuelve el número de semana exacto tomando como SEM 1 el 29/12/2025."""
     if isinstance(fecha_obj, datetime):
         fecha_obj = fecha_obj.date()
     delta_dias = (fecha_obj - FECHA_BASE_SEM1).days
@@ -518,7 +517,6 @@ def reportes_detallados(request):
             f_inicio = hoy
             f_fin = hoy
 
-        # Identificamos el rango exacto de semanas que caen en el periodo
         sem_inicio = obtener_numero_semana(f_inicio)
         sem_fin = obtener_numero_semana(f_fin)
         semanas_solicitadas = set(range(sem_inicio, sem_fin + 1))
@@ -546,7 +544,6 @@ def reportes_detallados(request):
             for r in definicion_rangos
         }
 
-        # Inicializamos el mapa de semanas del reporte
         semanas_map = {
             s: {"label": f"SEM {s}", "capital": 0.0, "interes": 0.0, "total": 0.0} 
             for s in sorted(semanas_solicitadas)
@@ -584,12 +581,10 @@ def reportes_detallados(request):
 
             cuotas_en_periodo = 0
 
-            # Evaluamos semana a semana el vencimiento de cada cuota
             for i in range(1, total_cuotas + 1):
                 fecha_vencimiento = f_inicio_p + timedelta(days=dias_por_cuota * i)
                 sem_cuota = obtener_numero_semana(fecha_vencimiento)
 
-                # Si la semana de esta cuota cae dentro de las semanas solicitadas
                 if sem_cuota in semanas_solicitadas and fecha_vencimiento >= f_inicio_p:
                     cuotas_en_periodo += 1
 
@@ -612,7 +607,6 @@ def reportes_detallados(request):
                             datos_por_rango[label]["clientes"].add(titular)
                         break
 
-        # Construcción de la tabla de Rangos
         rangos_resultado = []
         for r in definicion_rangos:
             label = r["label"]
@@ -628,7 +622,6 @@ def reportes_detallados(request):
                 "clientes": ", ".join(lista_titulares) if lista_titulares else "0 préstamos"
             })
 
-        # Construcción del Historial ordenado por número de semana
         historial_data = [
             {
                 "fecha": valores["label"],
