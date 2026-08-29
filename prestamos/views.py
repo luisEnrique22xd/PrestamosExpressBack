@@ -343,7 +343,7 @@ from rest_framework.response import Response
 from .models import Prestamo, Abono
 
 @api_view(['GET'])
-@permission_classes([AllowAny]) # O IsAuthenticated según tu configuración
+@permission_classes([AllowAny])
 def reportes_detallados(request):
     try:
         inicio_str = request.query_params.get('inicio')
@@ -372,7 +372,7 @@ def reportes_detallados(request):
             {"label": "12501-15000", "min": 12501, "max": 15000},
         ]
 
-        # 1. Traemos préstamos activos o registrados
+        # 1. Traemos préstamos candidatos
         prestamos_candidatos = Prestamo.objects.select_related('cliente', 'grupo').all()
 
         rangos_resultado = []
@@ -389,7 +389,6 @@ def reportes_detallados(request):
             conteo_prestamos = 0
 
             for p in p_en_rango:
-                # Normalizar fecha de inicio de forma 100% segura
                 f_raw = p.fecha_inicio or getattr(p, 'fecha_creacion', None)
                 if not f_raw:
                     continue
@@ -404,7 +403,6 @@ def reportes_detallados(request):
                     except Exception:
                         continue
 
-                # Modalidad y cálculo de días por cuota
                 modalidad_upper = (p.modalidad or 'S').upper()
                 if 'S' in modalidad_upper or 'SEMANAL' in modalidad_upper:
                     dias_por_cuota = 7
@@ -423,7 +421,6 @@ def reportes_detallados(request):
                 
                 cuotas_en_periodo = 0
                 
-                # Evaluamos vencimiento de cada cuota
                 for i in range(1, total_cuotas + 1):
                     fecha_vencimiento_cuota = f_inicio_p + timedelta(days=dias_por_cuota * i)
                     if f_inicio <= fecha_vencimiento_cuota <= f_fin:
@@ -450,10 +447,10 @@ def reportes_detallados(request):
                 "clientes": ", ".join(lista_nombres) if lista_nombres else "0 préstamos"
             })
 
-        # 2. Historial de Abonos dentro del Periodo
+        # 2. Historial de Abonos (Filtro corregido sin __date)
         abonos_periodo = Abono.objects.filter(
-            fecha_pago__date__gte=f_inicio,
-            fecha_pago__date__lte=f_fin
+            fecha_pago__gte=f_inicio,
+            fecha_pago__lte=f_fin
         ).select_related('prestamo').order_by('fecha_pago')
 
         dias_map = {}
