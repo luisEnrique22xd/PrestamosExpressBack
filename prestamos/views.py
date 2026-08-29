@@ -488,7 +488,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from .models import Prestamo
 
-# Fecha de anclaje oficial: Lunes 29 de Diciembre de 2025
+# Anclaje oficial: Lunes 29 de Diciembre de 2025 = SEM 1
 FECHA_BASE_SEM1 = date(2025, 12, 29)
 
 def obtener_numero_semana(fecha_obj):
@@ -567,9 +567,7 @@ def reportes_detallados(request):
                 except Exception:
                     continue
 
-            modalidad_upper = (p.modalidad or 'S').upper()
-            dias_por_cuota = 7 if ('S' in modalidad_upper or 'SEMANAL' in modalidad_upper) else (15 if 'Q' in modalidad_upper else 30)
-
+            modalidad = (p.modalidad or 'S').strip().upper()
             total_cuotas = int(p.cuotas) if (p.cuotas and int(p.cuotas) > 0) else 1
             monto_cap_total = float(p.monto_capital or 0)
             monto_pagar_total = float(p.monto_total_pagar or 0)
@@ -581,11 +579,19 @@ def reportes_detallados(request):
 
             cuotas_en_periodo = 0
 
+            # Ajuste de periodicidades según el calendario semanal de la sábana
+            if modalidad == 'S' or 'SEMANAL' in modalidad:
+                dias_salto = 7
+            elif modalidad == 'Q' or 'QUINCENAL' in modalidad:
+                dias_salto = 14  # Exactamente 2 semanas en la sábana
+            else:
+                dias_salto = 28  # 4 semanas cerradas para créditos mensuales
+
             for i in range(1, total_cuotas + 1):
-                fecha_vencimiento = f_inicio_p + timedelta(days=dias_por_cuota * i)
+                fecha_vencimiento = f_inicio_p + timedelta(days=dias_salto * i)
                 sem_cuota = obtener_numero_semana(fecha_vencimiento)
 
-                if sem_cuota in semanas_solicitadas and fecha_vencimiento >= f_inicio_p:
+                if sem_cuota in semanas_solicitadas:
                     cuotas_en_periodo += 1
 
                     if sem_cuota in semanas_map:
@@ -630,7 +636,6 @@ def reportes_detallados(request):
                 "total": round(valores["total"], 2)
             }
             for s_num, valores in sorted(semanas_map.items())
-            if valores["total"] > 0
         ]
 
         return Response({
