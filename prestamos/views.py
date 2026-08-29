@@ -578,14 +578,7 @@ def reportes_detallados(request):
             monto_cuota = cap_cuota + int_cuota
 
             cuotas_en_periodo = 0
-
-            # Ajuste de periodicidades según el calendario semanal de la sábana
-            if modalidad == 'S' or 'SEMANAL' in modalidad:
-                dias_salto = 7
-            elif modalidad == 'Q' or 'QUINCENAL' in modalidad:
-                dias_salto = 14  # Exactamente 2 semanas en la sábana
-            else:
-                dias_salto = 28  # 4 semanas cerradas para créditos mensuales
+            dias_salto = 7 if modalidad == 'S' or 'SEMANAL' in modalidad else (14 if modalidad == 'Q' else 28)
 
             for i in range(1, total_cuotas + 1):
                 fecha_vencimiento = f_inicio_p + timedelta(days=dias_salto * i)
