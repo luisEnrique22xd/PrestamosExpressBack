@@ -333,14 +333,160 @@ def estadisticas_globales(request):
 #         "historial": historial_data
 #     })
 
-from datetime import datetime, date
+#reportes real cobrado
+# from datetime import datetime, date
+# from decimal import Decimal
+# import pytz
+# from django.utils import timezone
+# from rest_framework.decorators import api_view, permission_classes
+# from rest_framework.permissions import AllowAny
+# from rest_framework.response import Response
+# from .models import Abono
+
+# @api_view(['GET'])
+# @permission_classes([AllowAny])
+# def reportes_detallados(request):
+#     try:
+#         inicio_str = request.query_params.get('inicio')
+#         fin_str = request.query_params.get('fin')
+#         mexico_tz = pytz.timezone('America/Mexico_City')
+        
+#         if inicio_str and fin_str:
+#             try:
+#                 f_inicio = datetime.strptime(inicio_str, '%Y-%m-%d').date()
+#                 f_fin = datetime.strptime(fin_str, '%Y-%m-%d').date()
+#             except ValueError:
+#                 f_inicio = timezone.now().astimezone(mexico_tz).date()
+#                 f_fin = f_inicio
+#         else:
+#             hoy = timezone.now().astimezone(mexico_tz).date()
+#             f_inicio = hoy
+#             f_fin = hoy
+
+#         definicion_rangos = [
+#             {"label": "500-1500", "min": 500, "max": 1500},
+#             {"label": "1501-3000", "min": 1501, "max": 3000},
+#             {"label": "3001-5000", "min": 3001, "max": 5000},
+#             {"label": "5001-7500", "min": 5001, "max": 7500},
+#             {"label": "7501-10000", "min": 7501, "max": 10000},
+#             {"label": "10001-12500", "min": 10001, "max": 12500},
+#             {"label": "12501-15000", "min": 12501, "max": 15000},
+#         ]
+
+#         # 1. Obtenemos TODOS los abonos registrados dentro del periodo solicitado
+#         abonos_periodo = Abono.objects.filter(
+#             fecha_pago__gte=f_inicio,
+#             fecha_pago__lte=f_fin
+#         ).select_related('prestamo', 'prestamo__cliente', 'prestamo__grupo').order_by('fecha_pago')
+
+#         # Estructura para acumular datos por Rango
+#         datos_por_rango = {
+#             r["label"]: {
+#                 "capital": 0.0,
+#                 "interes": 0.0,
+#                 "total": 0.0,
+#                 "clientes": set(),
+#                 "prestamos_ids": set()
+#             }
+#             for r in definicion_rangos
+#         }
+
+#         # Estructura para acumular datos por Día (Historial)
+#         dias_map = {}
+
+#         for ab in abonos_periodo:
+#             p = ab.prestamo
+#             if not p:
+#                 continue
+
+#             monto_abono = float(ab.monto or 0)
+#             m_total = float(p.monto_total_pagar or 0)
+#             m_cap = float(p.monto_capital or 0)
+
+#             # Proporción exacta de interés según el contrato pactado
+#             tasa_interes = 0.0
+#             if m_total > 0 and m_total > m_cap:
+#                 tasa_interes = (m_total - m_cap) / m_total
+
+#             int_abono = monto_abono * tasa_interes
+#             cap_abono = monto_abono - int_abono
+
+#             # --- A. Acumulación en Historial Diario ---
+#             f_pago = ab.fecha_pago
+#             if isinstance(f_pago, datetime):
+#                 f_dia = f_pago.astimezone(mexico_tz).strftime('%d/%m/%Y')
+#             elif isinstance(f_pago, date):
+#                 f_dia = f_pago.strftime('%d/%m/%Y')
+#             else:
+#                 f_dia = str(f_pago)[:10]
+
+#             if f_dia not in dias_map:
+#                 dias_map[f_dia] = {"capital": 0.0, "interes": 0.0, "total": 0.0}
+
+#             dias_map[f_dia]["capital"] += cap_abono
+#             dias_map[f_dia]["interes"] += int_abono
+#             dias_map[f_dia]["total"] += monto_abono
+
+#             # --- B. Acumulación en Rangos de Inversión ---
+#             for r in definicion_rangos:
+#                 if Decimal(str(r["min"])) <= p.monto_capital <= Decimal(str(r["max"])):
+#                     label = r["label"]
+#                     datos_por_rango[label]["capital"] += cap_abono
+#                     datos_por_rango[label]["interes"] += int_abono
+#                     datos_por_rango[label]["total"] += monto_abono
+#                     datos_por_rango[label]["prestamos_ids"].add(p.id)
+
+#                     titular = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else None)
+#                     if titular:
+#                         datos_por_rango[label]["clientes"].add(titular)
+#                     break
+
+#         # Construcción del resultado final de Rangos
+#         rangos_resultado = []
+#         for r in definicion_rangos:
+#             label = r["label"]
+#             d = datos_por_rango[label]
+#             lista_titulares = sorted(list(d["clientes"]))
+
+#             rangos_resultado.append({
+#                 "rango": label,
+#                 "capital": round(d["capital"], 2),
+#                 "interes": round(d["interes"], 2),
+#                 "total": round(d["total"], 2),
+#                 "cant": len(d["prestamos_ids"]),
+#                 "clientes": ", ".join(lista_titulares) if lista_titulares else "0 préstamos"
+#             })
+
+#         # Construcción del resultado final de Historial
+#         historial_data = [
+#             {
+#                 "fecha": dia,
+#                 "capital": round(valores["capital"], 2),
+#                 "interes": round(valores["interes"], 2),
+#                 "total": round(valores["total"], 2)
+#             }
+#             for dia, valores in dias_map.items()
+#         ]
+
+#         return Response({
+#             "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')}",
+#             "rangos": rangos_resultado,
+#             "historial": historial_data
+#         })
+
+#     except Exception as e:
+#         import traceback
+#         print(traceback.format_exc())
+#         return Response({"error": str(e)}, status=500)
+
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 import pytz
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from .models import Abono
+from .models import Prestamo, Abono
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -372,13 +518,10 @@ def reportes_detallados(request):
             {"label": "12501-15000", "min": 12501, "max": 15000},
         ]
 
-        # 1. Obtenemos TODOS los abonos registrados dentro del periodo solicitado
-        abonos_periodo = Abono.objects.filter(
-            fecha_pago__gte=f_inicio,
-            fecha_pago__lte=f_fin
-        ).select_related('prestamo', 'prestamo__cliente', 'prestamo__grupo').order_by('fecha_pago')
+        # 1. Traemos préstamos que podrían tener cuotas en o antes del periodo
+        prestamos_candidatos = Prestamo.objects.select_related('cliente', 'grupo').all()
 
-        # Estructura para acumular datos por Rango
+        # Estructuras para acumular datos
         datos_por_rango = {
             r["label"]: {
                 "capital": 0.0,
@@ -390,57 +533,79 @@ def reportes_detallados(request):
             for r in definicion_rangos
         }
 
-        # Estructura para acumular datos por Día (Historial)
-        dias_map = {}
+        # Mapa de cuotas por fecha de vencimiento dentro del periodo
+        dias_programados_map = {}
 
-        for ab in abonos_periodo:
-            p = ab.prestamo
-            if not p:
+        for p in prestamos_candidatos:
+            if not p.monto_capital:
                 continue
 
-            monto_abono = float(ab.monto or 0)
-            m_total = float(p.monto_total_pagar or 0)
-            m_cap = float(p.monto_capital or 0)
+            # Normalizar fecha de inicio del crédito
+            f_raw = p.fecha_inicio or getattr(p, 'fecha_creacion', None)
+            if not f_raw:
+                continue
 
-            # Proporción exacta de interés según el contrato pactado
-            tasa_interes = 0.0
-            if m_total > 0 and m_total > m_cap:
-                tasa_interes = (m_total - m_cap) / m_total
-
-            int_abono = monto_abono * tasa_interes
-            cap_abono = monto_abono - int_abono
-
-            # --- A. Acumulación en Historial Diario ---
-            f_pago = ab.fecha_pago
-            if isinstance(f_pago, datetime):
-                f_dia = f_pago.astimezone(mexico_tz).strftime('%d/%m/%Y')
-            elif isinstance(f_pago, date):
-                f_dia = f_pago.strftime('%d/%m/%Y')
+            if isinstance(f_raw, datetime):
+                f_inicio_p = f_raw.astimezone(mexico_tz).date()
+            elif isinstance(f_raw, date):
+                f_inicio_p = f_raw
             else:
-                f_dia = str(f_pago)[:10]
+                try:
+                    f_inicio_p = datetime.strptime(str(f_raw).split(' ')[0], '%Y-%m-%d').date()
+                except Exception:
+                    continue
 
-            if f_dia not in dias_map:
-                dias_map[f_dia] = {"capital": 0.0, "interes": 0.0, "total": 0.0}
+            # Periodicidad de cuotas
+            modalidad_upper = (p.modalidad or 'S').upper()
+            if 'S' in modalidad_upper or 'SEMANAL' in modalidad_upper:
+                dias_por_cuota = 7
+            elif 'Q' in modalidad_upper or 'QUINCENAL' in modalidad_upper:
+                dias_por_cuota = 15
+            else:
+                dias_por_cuota = 30
 
-            dias_map[f_dia]["capital"] += cap_abono
-            dias_map[f_dia]["interes"] += int_abono
-            dias_map[f_dia]["total"] += monto_abono
+            total_cuotas = int(p.cuotas) if (p.cuotas and int(p.cuotas) > 0) else 1
+            monto_cap_total = float(p.monto_capital or 0)
+            monto_pagar_total = float(p.monto_total_pagar or 0)
+            int_total_credito = max(0.0, monto_pagar_total - monto_cap_total)
 
-            # --- B. Acumulación en Rangos de Inversión ---
-            for r in definicion_rangos:
-                if Decimal(str(r["min"])) <= p.monto_capital <= Decimal(str(r["max"])):
-                    label = r["label"]
-                    datos_por_rango[label]["capital"] += cap_abono
-                    datos_por_rango[label]["interes"] += int_abono
-                    datos_por_rango[label]["total"] += monto_abono
-                    datos_por_rango[label]["prestamos_ids"].add(p.id)
+            cap_cuota = monto_cap_total / total_cuotas
+            int_cuota = int_total_credito / total_cuotas
+            monto_cuota = cap_cuota + int_cuota
 
-                    titular = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else None)
-                    if titular:
-                        datos_por_rango[label]["clientes"].add(titular)
-                    break
+            cuotas_en_periodo = 0
 
-        # Construcción del resultado final de Rangos
+            # Evaluamos el vencimiento de cada cuota pactada
+            for i in range(1, total_cuotas + 1):
+                fecha_vencimiento = f_inicio_p + timedelta(days=dias_por_cuota * i)
+
+                if f_inicio <= fecha_vencimiento <= f_fin:
+                    cuotas_en_periodo += 1
+                    f_dia_str = fecha_vencimiento.strftime('%d/%m/%Y')
+
+                    if f_dia_str not in dias_programados_map:
+                        dias_programados_map[f_dia_str] = {"capital": 0.0, "interes": 0.0, "total": 0.0}
+
+                    dias_programados_map[f_dia_str]["capital"] += cap_cuota
+                    dias_programados_map[f_dia_str]["interes"] += int_cuota
+                    dias_programados_map[f_dia_str]["total"] += monto_cuota
+
+            # Si el crédito tuvo al menos una cuota programada en el periodo
+            if cuotas_en_periodo > 0:
+                for r in definicion_rangos:
+                    if Decimal(str(r["min"])) <= p.monto_capital <= Decimal(str(r["max"])):
+                        label = r["label"]
+                        datos_por_rango[label]["capital"] += (cap_cuota * cuotas_en_periodo)
+                        datos_por_rango[label]["interes"] += (int_cuota * cuotas_en_periodo)
+                        datos_por_rango[label]["total"] += (monto_cuota * cuotas_en_periodo)
+                        datos_por_rango[label]["prestamos_ids"].add(p.id)
+
+                        titular = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else None)
+                        if titular:
+                            datos_por_rango[label]["clientes"].add(titular)
+                        break
+
+        # Construcción de la tabla de Rangos
         rangos_resultado = []
         for r in definicion_rangos:
             label = r["label"]
@@ -456,16 +621,16 @@ def reportes_detallados(request):
                 "clientes": ", ".join(lista_titulares) if lista_titulares else "0 préstamos"
             })
 
-        # Construcción del resultado final de Historial
-        historial_data = [
-            {
-                "fecha": dia,
+        # Construcción del Historial Programado ordenado cronológicamente
+        historial_data = []
+        for dia_str in sorted(dias_programados_map.keys(), key=lambda x: datetime.strptime(x, '%d/%m/%Y')):
+            valores = dias_programados_map[dia_str]
+            historial_data.append({
+                "fecha": dia_str,
                 "capital": round(valores["capital"], 2),
                 "interes": round(valores["interes"], 2),
                 "total": round(valores["total"], 2)
-            }
-            for dia, valores in dias_map.items()
-        ]
+            })
 
         return Response({
             "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')}",
