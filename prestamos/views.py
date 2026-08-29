@@ -570,6 +570,7 @@ def reportes_detallados(request):
 
             cuotas_en_periodo = 0
 
+            # Evaluamos exclusivamente cuotas cuyo vencimiento cae entre f_inicio y f_fin
             for i in range(1, total_cuotas + 1):
                 fecha_vencimiento = f_inicio_p + timedelta(days=dias_por_cuota * i)
 
@@ -588,6 +589,7 @@ def reportes_detallados(request):
                 for r in definicion_rangos:
                     if Decimal(str(r["min"])) <= p.monto_capital <= Decimal(str(r["max"])):
                         label = r["label"]
+                        # Acumulamos SOLO las cuotas que cayeron en el periodo
                         datos_por_rango[label]["capital"] += (cap_cuota * cuotas_en_periodo)
                         datos_por_rango[label]["interes"] += (int_cuota * cuotas_en_periodo)
                         datos_por_rango[label]["total"] += (monto_cuota * cuotas_en_periodo)
