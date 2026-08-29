@@ -488,6 +488,16 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from .models import Prestamo
 
+# Fecha de anclaje oficial: Lunes 29 de Diciembre de 2025
+FECHA_BASE_SEM1 = date(2025, 12, 29)
+
+def obtener_numero_semana(fecha_obj):
+    """Devuelve el número de semana exacto tomando como SEM 1 el 29/12/2025."""
+    if isinstance(fecha_obj, datetime):
+        fecha_obj = fecha_obj.date()
+    delta_dias = (fecha_obj - FECHA_BASE_SEM1).days
+    return (delta_dias // 7) + 1
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def reportes_detallados(request):
@@ -508,11 +518,10 @@ def reportes_detallados(request):
             f_inicio = hoy
             f_fin = hoy
 
-        # Identificamos el rango de semanas ISO que abarca el filtro
-        # Para Agosto 2026: SEM 31, SEM 32, SEM 33 y SEM 34
-        sem_inicio = f_inicio.isocalendar()[1]
-        sem_fin = f_fin.isocalendar()[1]
-        semanas_solicitadas = set(range(sem_inicio, sem_fin + (0 if sem_fin > 34 and f_fin.month == 8 else 1)))
+        # Identificamos el rango exacto de semanas que caen en el periodo
+        sem_inicio = obtener_numero_semana(f_inicio)
+        sem_fin = obtener_numero_semana(f_fin)
+        semanas_solicitadas = set(range(sem_inicio, sem_fin + 1))
 
         definicion_rangos = [
             {"label": "500-1500", "min": 500, "max": 1500},
@@ -537,7 +546,11 @@ def reportes_detallados(request):
             for r in definicion_rangos
         }
 
-        semanas_map = {f"SEM {s}": {"capital": 0.0, "interes": 0.0, "total": 0.0} for s in sorted(semanas_solicitadas)}
+        # Inicializamos el mapa de semanas del reporte
+        semanas_map = {
+            s: {"label": f"SEM {s}", "capital": 0.0, "interes": 0.0, "total": 0.0} 
+            for s in sorted(semanas_solicitadas)
+        }
 
         for p in prestamos_candidatos:
             if not p.monto_capital or float(p.monto_capital) <= 0:
@@ -571,19 +584,19 @@ def reportes_detallados(request):
 
             cuotas_en_periodo = 0
 
+            # Evaluamos semana a semana el vencimiento de cada cuota
             for i in range(1, total_cuotas + 1):
                 fecha_vencimiento = f_inicio_p + timedelta(days=dias_por_cuota * i)
-                sem_cuota = fecha_vencimiento.isocalendar()[1]
+                sem_cuota = obtener_numero_semana(fecha_vencimiento)
 
-                # Si la cuota pertenece a una de las semanas del mes solicitado
-                if sem_cuota in semanas_solicitadas and f_inicio_p <= fecha_vencimiento:
+                # Si la semana de esta cuota cae dentro de las semanas solicitadas
+                if sem_cuota in semanas_solicitadas and fecha_vencimiento >= f_inicio_p:
                     cuotas_en_periodo += 1
-                    sem_key = f"SEM {sem_cuota}"
-                    
-                    if sem_key in semanas_map:
-                        semanas_map[sem_key]["capital"] += cap_cuota
-                        semanas_map[sem_key]["interes"] += int_cuota
-                        semanas_map[sem_key]["total"] += monto_cuota
+
+                    if sem_cuota in semanas_map:
+                        semanas_map[sem_cuota]["capital"] += cap_cuota
+                        semanas_map[sem_cuota]["interes"] += int_cuota
+                        semanas_map[sem_cuota]["total"] += monto_cuota
 
             if cuotas_en_periodo > 0:
                 for r in definicion_rangos:
@@ -599,6 +612,7 @@ def reportes_detallados(request):
                             datos_por_rango[label]["clientes"].add(titular)
                         break
 
+        # Construcción de la tabla de Rangos
         rangos_resultado = []
         for r in definicion_rangos:
             label = r["label"]
@@ -614,19 +628,20 @@ def reportes_detallados(request):
                 "clientes": ", ".join(lista_titulares) if lista_titulares else "0 préstamos"
             })
 
+        # Construcción del Historial ordenado por número de semana
         historial_data = [
             {
-                "fecha": sem_label,
+                "fecha": valores["label"],
                 "capital": round(valores["capital"], 2),
                 "interes": round(valores["interes"], 2),
                 "total": round(valores["total"], 2)
             }
-            for sem_label, valores in sorted(semanas_map.items())
+            for s_num, valores in sorted(semanas_map.items())
             if valores["total"] > 0
         ]
 
         return Response({
-            "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')} (Semanas {min(semanas_solicitadas)} a {max(semanas_solicitadas)})",
+            "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')} (Semanas {sem_inicio} a {sem_fin})",
             "rangos": rangos_resultado,
             "historial": historial_data
         })
