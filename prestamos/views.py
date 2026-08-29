@@ -195,10 +195,149 @@ def estadisticas_globales(request):
     })
 
 # prestamos/views.py
+# from datetime import datetime, timedelta
+# from decimal import Decimal
+# import pytz
+# from django.db.models import Sum, Q
+# from rest_framework.decorators import api_view
+# from rest_framework.response import Response
+# from .models import Prestamo, Abono
+
+# @api_view(['GET'])
+# def reportes_detallados(request):
+#     inicio_str = request.query_params.get('inicio')
+#     fin_str = request.query_params.get('fin')
+#     mexico_tz = pytz.timezone('America/Mexico_City')
+    
+#     if inicio_str and fin_str:
+#         f_inicio = datetime.strptime(inicio_str, '%Y-%m-%d').date()
+#         f_fin = datetime.strptime(fin_str, '%Y-%m-%d').date()
+#     else:
+#         hoy = timezone.now().astimezone(mexico_tz).date()
+#         f_inicio = hoy
+#         f_fin = hoy
+
+#     # Definición de las cubetas de inversión por rango de Capital Inicial
+#     definicion_rangos = [
+#         {"label": "500-1500", "min": 500, "max": 1500},
+#         {"label": "1501-3000", "min": 1501, "max": 3000},
+#         {"label": "3001-5000", "min": 3001, "max": 5000},
+#         {"label": "5001-7500", "min": 5001, "max": 7500},
+#         {"label": "7501-10000", "min": 7501, "max": 10000},
+#         {"label": "10001-12500", "min": 10001, "max": 12500},
+#         {"label": "12501-15000", "min": 12501, "max": 15000},
+#     ]
+
+#     # Traemos los préstamos que tienen relevancia en el tiempo
+#     prestamos_periodo = Prestamo.objects.filter(
+#         fecha_inicio__date__lte=f_fin
+#     ).distinct()
+
+#     rangos_resultado = []
+
+#     for r in definicion_rangos:
+#         # Filtrar los préstamos que pertenecen a este rango según su CAPITAL INICIAL
+#         p_en_rango = prestamos_periodo.filter(
+#             monto_capital__gte=Decimal(str(r['min'])),
+#             monto_capital__lte=Decimal(str(r['max']))
+#         )
+        
+#         # Nombres únicos de clientes o grupos en este rango
+#         nombres_c = list(p_en_rango.filter(cliente__isnull=False).values_list('cliente__nombre', flat=True))
+#         nombres_g = list(p_en_rango.filter(grupo__isnull=False).values_list('grupo__nombre_grupo', flat=True))
+#         lista_nombres = sorted(list(set([n for n in (nombres_c + nombres_g) if n])))
+
+#         cap_total_rango = 0.0
+#         int_devengado_rango = 0.0
+#         total_cobrado_rango = 0.0
+#         conteo_prestamos = 0
+
+#         for p in p_en_rango:
+#             f_inicio_p = p.fecha_inicio.astimezone(mexico_tz).date() if hasattr(p.fecha_inicio, 'astimezone') else p.fecha_inicio
+            
+#             # --- 1. LÓGICA DE CAPITAL INICIAL COMPLETO ---
+#             # El capital inicial SOLO se suma si el préstamo empezó dentro de las fechas solicitadas
+#             cap_inicial_p = 0.0
+#             prestamo_contado = False
+#             if f_inicio <= f_inicio_p <= f_fin:
+#                 cap_inicial_p = float(p.monto_capital)
+#                 conteo_prestamos += 1
+#                 prestamo_contado = True
+
+#             # --- 2. LÓGICA DE INTERÉS POR CUOTAS EXACTAS ---
+#             # Identificamos el valor en días de cada cuota según la modalidad
+#             modalidad_upper = p.modalidad.upper() if p.modalidad else 'S'
+#             if 'S' in modalidad_upper or 'SEMANAL' in modalidad_upper:
+#                 dias_por_cuota = 7
+#             elif 'Q' in modalidad_upper or 'QUINCENAL' in modalidad_upper:
+#                 dias_por_cuota = 15
+#             else:
+#                 dias_por_cuota = 30
+
+#             # Calculamos cuánto vale el interés de una sola cuota (Ej: 150 / 4 = 37.50)
+#             int_total_credito = float(p.monto_total_pagar) - float(p.monto_capital)
+#             interes_por_cuota = int_total_credito / (p.cuotas if p.cuotas > 0 else 1)
+            
+#             cuotas_en_periodo = 0
+            
+#             # Evaluamos la fecha de vencimiento de cada cuota
+#             for i in range(1, p.cuotas + 1):
+#                 fecha_vencimiento_cuota = f_inicio_p + timedelta(days=dias_por_cuota * i)
+                
+#                 # Si la cuota vence dentro del rango del reporte, se devenga su interés
+#                 if f_inicio <= fecha_vencimiento_cuota <= f_fin:
+#                     cuotas_en_periodo += 1
+
+#             # Calculamos el interés acumulado por las cuotas que cayeron en el periodo
+#             int_proporcional_p = interes_por_cuota * cuotas_en_periodo
+
+#             # Si el préstamo generó intereses en este periodo pero no había sido contado por fecha de inicio, lo sumamos
+#             if cuotas_en_periodo > 0 and not prestamo_contado:
+#                 conteo_prestamos += 1
+
+#             # Acumulamos los valores finales en el rango
+#             cap_total_rango += cap_inicial_p
+#             int_devengado_rango += int_proporcional_p
+#             total_cobrado_rango += (cap_inicial_p + int_proporcional_p)
+
+#         rangos_resultado.append({
+#             "rango": r["label"],
+#             "capital": round(cap_total_rango, 2),
+#             "interes": round(int_devengado_rango, 2),
+#             "total": round(total_cobrado_rango, 2),
+#             "cant": conteo_prestamos,
+#             "clientes": ", ".join(lista_nombres) if lista_nombres else "0 préstamos"
+#         })
+
+#     # --- TABLA 2: HISTORIAL COBRANZA ---
+#     abonos_periodo = Abono.objects.filter(
+#         fecha_pago__range=[f_inicio, f_fin]
+#     ).values('fecha_pago').annotate(total_dia=Sum('monto')).order_by('fecha_pago')
+
+#     historial_data = []
+#     for ab in abonos_periodo:
+#         total_dia = float(ab['total_dia'])
+#         int_estimado = total_dia - (total_dia / 1.2)
+#         cap_estimado = total_dia - int_estimado
+
+#         historial_data.append({
+#             "fecha": ab['fecha_pago'].strftime('%d/%m/%Y'),
+#             "capital": round(cap_estimado, 2),
+#             "interes": round(int_estimado, 2),
+#             "total": round(total_dia, 2)
+#         })
+
+#     return Response({
+#         "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')}",
+#         "rangos": rangos_resultado,
+#         "historial": historial_data
+#     })
+
 from datetime import datetime, timedelta
 from decimal import Decimal
 import pytz
-from django.db.models import Sum, Q
+from django.utils import timezone
+from django.db.models import Sum
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import Prestamo, Abono
@@ -217,7 +356,6 @@ def reportes_detallados(request):
         f_inicio = hoy
         f_fin = hoy
 
-    # Definición de las cubetas de inversión por rango de Capital Inicial
     definicion_rangos = [
         {"label": "500-1500", "min": 500, "max": 1500},
         {"label": "1501-3000", "min": 1501, "max": 3000},
@@ -228,44 +366,27 @@ def reportes_detallados(request):
         {"label": "12501-15000", "min": 12501, "max": 15000},
     ]
 
-    # Traemos los préstamos que tienen relevancia en el tiempo
-    prestamos_periodo = Prestamo.objects.filter(
+    prestamos_candidatos = Prestamo.objects.filter(
         fecha_inicio__date__lte=f_fin
-    ).distinct()
+    ).select_related('cliente', 'grupo').distinct()
 
     rangos_resultado = []
 
     for r in definicion_rangos:
-        # Filtrar los préstamos que pertenecen a este rango según su CAPITAL INICIAL
-        p_en_rango = prestamos_periodo.filter(
-            monto_capital__gte=Decimal(str(r['min'])),
-            monto_capital__lte=Decimal(str(r['max']))
-        )
+        p_en_rango = [
+            p for p in prestamos_candidatos 
+            if Decimal(str(r['min'])) <= p.monto_capital <= Decimal(str(r['max']))
+        ]
         
-        # Nombres únicos de clientes o grupos en este rango
-        nombres_c = list(p_en_rango.filter(cliente__isnull=False).values_list('cliente__nombre', flat=True))
-        nombres_g = list(p_en_rango.filter(grupo__isnull=False).values_list('grupo__nombre_grupo', flat=True))
-        lista_nombres = sorted(list(set([n for n in (nombres_c + nombres_g) if n])))
-
-        cap_total_rango = 0.0
-        int_devengado_rango = 0.0
-        total_cobrado_rango = 0.0
+        cap_periodo_rango = 0.0
+        int_periodo_rango = 0.0
+        clientes_activos_periodo = set()
         conteo_prestamos = 0
 
         for p in p_en_rango:
             f_inicio_p = p.fecha_inicio.astimezone(mexico_tz).date() if hasattr(p.fecha_inicio, 'astimezone') else p.fecha_inicio
             
-            # --- 1. LÓGICA DE CAPITAL INICIAL COMPLETO ---
-            # El capital inicial SOLO se suma si el préstamo empezó dentro de las fechas solicitadas
-            cap_inicial_p = 0.0
-            prestamo_contado = False
-            if f_inicio <= f_inicio_p <= f_fin:
-                cap_inicial_p = float(p.monto_capital)
-                conteo_prestamos += 1
-                prestamo_contado = True
-
-            # --- 2. LÓGICA DE INTERÉS POR CUOTAS EXACTAS ---
-            # Identificamos el valor en días de cada cuota según la modalidad
+            # Modalidad y periodicidad de cuotas
             modalidad_upper = p.modalidad.upper() if p.modalidad else 'S'
             if 'S' in modalidad_upper or 'SEMANAL' in modalidad_upper:
                 dias_por_cuota = 7
@@ -274,58 +395,82 @@ def reportes_detallados(request):
             else:
                 dias_por_cuota = 30
 
-            # Calculamos cuánto vale el interés de una sola cuota (Ej: 150 / 4 = 37.50)
-            int_total_credito = float(p.monto_total_pagar) - float(p.monto_capital)
-            interes_por_cuota = int_total_credito / (p.cuotas if p.cuotas > 0 else 1)
+            total_cuotas = p.cuotas if p.cuotas > 0 else 1
+            monto_capital_total = float(p.monto_capital)
+            monto_pagar_total = float(p.monto_total_pagar)
+            int_total_credito = monto_pagar_total - monto_capital_total
+            
+            # Valor individual de capital e interés por cada cuota
+            capital_por_cuota = monto_capital_total / total_cuotas
+            interes_por_cuota = int_total_credito / total_cuotas
             
             cuotas_en_periodo = 0
             
-            # Evaluamos la fecha de vencimiento de cada cuota
-            for i in range(1, p.cuotas + 1):
+            # Detección de cuotas vencidas dentro del rango del mes
+            for i in range(1, total_cuotas + 1):
                 fecha_vencimiento_cuota = f_inicio_p + timedelta(days=dias_por_cuota * i)
-                
-                # Si la cuota vence dentro del rango del reporte, se devenga su interés
                 if f_inicio <= fecha_vencimiento_cuota <= f_fin:
                     cuotas_en_periodo += 1
 
-            # Calculamos el interés acumulado por las cuotas que cayeron en el periodo
-            int_proporcional_p = interes_por_cuota * cuotas_en_periodo
-
-            # Si el préstamo generó intereses en este periodo pero no había sido contado por fecha de inicio, lo sumamos
-            if cuotas_en_periodo > 0 and not prestamo_contado:
+            # Si el crédito tuvo cuotas programadas/cobradas en este periodo
+            if cuotas_en_periodo > 0:
                 conteo_prestamos += 1
+                nombre_titular = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else None)
+                if nombre_titular:
+                    clientes_activos_periodo.add(nombre_titular)
 
-            # Acumulamos los valores finales en el rango
-            cap_total_rango += cap_inicial_p
-            int_devengado_rango += int_proporcional_p
-            total_cobrado_rango += (cap_inicial_p + int_proporcional_p)
+                cap_periodo_rango += (capital_por_cuota * cuotas_en_periodo)
+                int_periodo_rango += (interes_por_cuota * cuotas_en_periodo)
+
+        total_periodo_rango = cap_periodo_rango + int_periodo_rango
+        lista_nombres = sorted(list(clientes_activos_periodo))
 
         rangos_resultado.append({
             "rango": r["label"],
-            "capital": round(cap_total_rango, 2),
-            "interes": round(int_devengado_rango, 2),
-            "total": round(total_cobrado_rango, 2),
+            "capital": round(cap_periodo_rango, 2),
+            "interes": round(int_periodo_rango, 2),
+            "total": round(total_periodo_rango, 2),
             "cant": conteo_prestamos,
             "clientes": ", ".join(lista_nombres) if lista_nombres else "0 préstamos"
         })
 
-    # --- TABLA 2: HISTORIAL COBRANZA ---
+    # --- TABLA 2: HISTORIAL DE COBRANZA REAL ---
     abonos_periodo = Abono.objects.filter(
-        fecha_pago__range=[f_inicio, f_fin]
-    ).values('fecha_pago').annotate(total_dia=Sum('monto')).order_by('fecha_pago')
+        fecha_pago__date__gte=f_inicio,
+        fecha_pago__date__lte=f_fin
+    ).select_related('prestamo').order_by('fecha_pago')
 
-    historial_data = []
+    dias_map = {}
     for ab in abonos_periodo:
-        total_dia = float(ab['total_dia'])
-        int_estimado = total_dia - (total_dia / 1.2)
-        cap_estimado = total_dia - int_estimado
+        f_dia = ab.fecha_pago.strftime('%d/%m/%Y')
+        p = ab.prestamo
+        monto_abono = float(ab.monto)
+        
+        # Proporción exacta según el contrato de este abono
+        if p and float(p.monto_total_pagar) > 0:
+            tasa_interes = (float(p.monto_total_pagar) - float(p.monto_capital)) / float(p.monto_total_pagar)
+        else:
+            tasa_interes = 0.0
 
-        historial_data.append({
-            "fecha": ab['fecha_pago'].strftime('%d/%m/%Y'),
-            "capital": round(cap_estimado, 2),
-            "interes": round(int_estimado, 2),
-            "total": round(total_dia, 2)
-        })
+        int_abono = monto_abono * tasa_interes
+        cap_abono = monto_abono - int_abono
+
+        if f_dia not in dias_map:
+            dias_map[f_dia] = {"capital": 0.0, "interes": 0.0, "total": 0.0}
+
+        dias_map[f_dia]["capital"] += cap_abono
+        dias_map[f_dia]["interes"] += int_abono
+        dias_map[f_dia]["total"] += monto_abono
+
+    historial_data = [
+        {
+            "fecha": dia,
+            "capital": round(valores["capital"], 2),
+            "interes": round(valores["interes"], 2),
+            "total": round(valores["total"], 2)
+        }
+        for dia, valores in dias_map.items()
+    ]
 
     return Response({
         "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')}",
