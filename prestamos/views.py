@@ -508,6 +508,11 @@ def reportes_detallados(request):
             f_inicio = hoy
             f_fin = hoy
 
+        # Semanas ISO del periodo consultado
+        semana_inicio = f_inicio.isocalendar()[1]
+        semana_fin = f_fin.isocalendar()[1]
+        # Para Agosto 2026: semana_inicio = 31, semana_fin = 35 (o 34)
+
         definicion_rangos = [
             {"label": "500-1500", "min": 500, "max": 1500},
             {"label": "1501-3000", "min": 1501, "max": 3000},
@@ -531,7 +536,8 @@ def reportes_detallados(request):
             for r in definicion_rangos
         }
 
-        dias_programados_map = {}
+        # Agrupador por semanas del mes
+        semanas_map = {}
 
         for p in prestamos_candidatos:
             if not p.monto_capital or float(p.monto_capital) <= 0:
@@ -552,12 +558,7 @@ def reportes_detallados(request):
                     continue
 
             modalidad_upper = (p.modalidad or 'S').upper()
-            if 'S' in modalidad_upper or 'SEMANAL' in modalidad_upper:
-                dias_por_cuota = 7
-            elif 'Q' in modalidad_upper or 'QUINCENAL' in modalidad_upper:
-                dias_por_cuota = 15
-            else:
-                dias_por_cuota = 30
+            dias_por_cuota = 7 if ('S' in modalidad_upper or 'SEMANAL' in modalidad_upper) else (15 if 'Q' in modalidad_upper else 30)
 
             total_cuotas = int(p.cuotas) if (p.cuotas and int(p.cuotas) > 0) else 1
             monto_cap_total = float(p.monto_capital or 0)
@@ -570,26 +571,26 @@ def reportes_detallados(request):
 
             cuotas_en_periodo = 0
 
-            # Evaluamos exclusivamente cuotas cuyo vencimiento cae entre f_inicio y f_fin
+            # Evaluamos semana a semana
             for i in range(1, total_cuotas + 1):
                 fecha_vencimiento = f_inicio_p + timedelta(days=dias_por_cuota * i)
-
+                
+                # Verificamos si la fecha cae dentro del rango exacto del reporte
                 if f_inicio <= fecha_vencimiento <= f_fin:
                     cuotas_en_periodo += 1
-                    f_dia_str = fecha_vencimiento.strftime('%d/%m/%Y')
+                    sem_num = f"SEM {fecha_vencimiento.isocalendar()[1]}"
 
-                    if f_dia_str not in dias_programados_map:
-                        dias_programados_map[f_dia_str] = {"capital": 0.0, "interes": 0.0, "total": 0.0}
+                    if sem_num not in semanas_map:
+                        semanas_map[sem_num] = {"capital": 0.0, "interes": 0.0, "total": 0.0}
 
-                    dias_programados_map[f_dia_str]["capital"] += cap_cuota
-                    dias_programados_map[f_dia_str]["interes"] += int_cuota
-                    dias_programados_map[f_dia_str]["total"] += monto_cuota
+                    semanas_map[sem_num]["capital"] += cap_cuota
+                    semanas_map[sem_num]["interes"] += int_cuota
+                    semanas_map[sem_num]["total"] += monto_cuota
 
             if cuotas_en_periodo > 0:
                 for r in definicion_rangos:
                     if Decimal(str(r["min"])) <= p.monto_capital <= Decimal(str(r["max"])):
                         label = r["label"]
-                        # Acumulamos SOLO las cuotas que cayeron en el periodo
                         datos_por_rango[label]["capital"] += (cap_cuota * cuotas_en_periodo)
                         datos_por_rango[label]["interes"] += (int_cuota * cuotas_en_periodo)
                         datos_por_rango[label]["total"] += (monto_cuota * cuotas_en_periodo)
@@ -615,15 +616,15 @@ def reportes_detallados(request):
                 "clientes": ", ".join(lista_titulares) if lista_titulares else "0 préstamos"
             })
 
-        historial_data = []
-        for dia_str in sorted(dias_programados_map.keys(), key=lambda x: datetime.strptime(x, '%d/%m/%Y')):
-            valores = dias_programados_map[dia_str]
-            historial_data.append({
-                "fecha": dia_str,
+        historial_data = [
+            {
+                "fecha": sem_label,
                 "capital": round(valores["capital"], 2),
                 "interes": round(valores["interes"], 2),
                 "total": round(valores["total"], 2)
-            })
+            }
+            for sem_label, valores in sorted(semanas_map.items())
+        ]
 
         return Response({
             "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')}",
