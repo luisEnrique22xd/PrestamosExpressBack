@@ -486,7 +486,7 @@ from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from .models import Prestamo, Abono
+from .models import Prestamo
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -518,10 +518,8 @@ def reportes_detallados(request):
             {"label": "12501-15000", "min": 12501, "max": 15000},
         ]
 
-        # 1. Traemos préstamos que podrían tener cuotas en o antes del periodo
         prestamos_candidatos = Prestamo.objects.select_related('cliente', 'grupo').all()
 
-        # Estructuras para acumular datos
         datos_por_rango = {
             r["label"]: {
                 "capital": 0.0,
@@ -533,14 +531,12 @@ def reportes_detallados(request):
             for r in definicion_rangos
         }
 
-        # Mapa de cuotas por fecha de vencimiento dentro del periodo
         dias_programados_map = {}
 
         for p in prestamos_candidatos:
-            if not p.monto_capital:
+            if not p.monto_capital or float(p.monto_capital) <= 0:
                 continue
 
-            # Normalizar fecha de inicio del crédito
             f_raw = p.fecha_inicio or getattr(p, 'fecha_creacion', None)
             if not f_raw:
                 continue
@@ -555,7 +551,6 @@ def reportes_detallados(request):
                 except Exception:
                     continue
 
-            # Periodicidad de cuotas
             modalidad_upper = (p.modalidad or 'S').upper()
             if 'S' in modalidad_upper or 'SEMANAL' in modalidad_upper:
                 dias_por_cuota = 7
@@ -575,7 +570,6 @@ def reportes_detallados(request):
 
             cuotas_en_periodo = 0
 
-            # Evaluamos el vencimiento de cada cuota pactada
             for i in range(1, total_cuotas + 1):
                 fecha_vencimiento = f_inicio_p + timedelta(days=dias_por_cuota * i)
 
@@ -590,7 +584,6 @@ def reportes_detallados(request):
                     dias_programados_map[f_dia_str]["interes"] += int_cuota
                     dias_programados_map[f_dia_str]["total"] += monto_cuota
 
-            # Si el crédito tuvo al menos una cuota programada en el periodo
             if cuotas_en_periodo > 0:
                 for r in definicion_rangos:
                     if Decimal(str(r["min"])) <= p.monto_capital <= Decimal(str(r["max"])):
@@ -605,7 +598,6 @@ def reportes_detallados(request):
                             datos_por_rango[label]["clientes"].add(titular)
                         break
 
-        # Construcción de la tabla de Rangos
         rangos_resultado = []
         for r in definicion_rangos:
             label = r["label"]
@@ -621,7 +613,6 @@ def reportes_detallados(request):
                 "clientes": ", ".join(lista_titulares) if lista_titulares else "0 préstamos"
             })
 
-        # Construcción del Historial Programado ordenado cronológicamente
         historial_data = []
         for dia_str in sorted(dias_programados_map.keys(), key=lambda x: datetime.strptime(x, '%d/%m/%Y')):
             valores = dias_programados_map[dia_str]
