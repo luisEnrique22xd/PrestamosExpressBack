@@ -309,7 +309,7 @@ class PrestamoSerializer(serializers.ModelSerializer):
 class AbonoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Abono
-        fields = ['id', 'prestamo', 'monto', 'semana_numero', 'fecha_pago']
+        fields = ['id', 'prestamo', 'monto', 'semana_numero', 'fecha_pago', 'modalidad']
         read_only_fields = ['fecha_pago']
 
     def validate_monto(self, value):

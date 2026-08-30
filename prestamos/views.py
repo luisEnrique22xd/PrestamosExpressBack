@@ -750,7 +750,8 @@ class RegistrarAbonoView(generics.CreateAPIView):
             "nuevo_saldo": nuevo_saldo_final, # Aquí saldrán los $3,150
             "cliente": sujeto,
             "fecha": abono.fecha_pago.strftime("%d/%m/%Y"),
-            "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S")
+            "hora": timezone.localtime(timezone.now()).strftime("%H:%M:%S"),
+            "modalidad": abono.modalidad,
         }, status=status.HTTP_201_CREATED)
         
     
