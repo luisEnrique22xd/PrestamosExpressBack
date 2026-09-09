@@ -212,11 +212,10 @@ def estadisticas_globales(request):
         "total_penalizaciones": total_moras_historicas,
         "grafica_semanal": grafica_semanal,
         "cobrado_hoy": f"${cobrado_hoy:,.2f}",
-        "total_moras_pendientes": total_moras_pendientes,
         "total_moras_pendientes": float(total_moras_pendientes),
         "penalizaciones_cobradas": float(penalizaciones_cobradas),
         "penalizaciones_condonadas": float(penalizaciones_condonadas),
-        "total_penalizaciones_historicas": float(total_penalizaciones_historicas),
+        "total_penalizaciones": float(total_penalizaciones_historicas), # La suma de Cobradas + Condonadas
     })
 
 # prestamos/views.py
