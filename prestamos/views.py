@@ -178,28 +178,30 @@ def estadisticas_globales(request):
             "dia": dias_nombres[f_iter.weekday()], 
             "monto": float(monto_dia)
         })
-    # 1. Penalizaciones Condonadas (Inactivas con motivo o fecha de condonación)
+   # 6. SECCIÓN DE PENALIZACIONES / MORAS
+    # 6.1. Penalizaciones Condonadas
     penalizaciones_condonadas = Penalizacion.objects.filter(
         activa=False
     ).filter(
         Q(motivo_condonacion__isnull=False) | Q(fecha_condonacion__isnull=False)
     ).aggregate(total=Sum('monto_penalizado'))['total'] or Decimal('0.00')
 
-    # 2. Penalizaciones Cobradas (Inactivas liquidadas por pago / sin condonación)
+    # 6.2. Penalizaciones Cobradas
     penalizaciones_cobradas = Penalizacion.objects.filter(
         activa=False,
         motivo_condonacion__isnull=True,
         fecha_condonacion__isnull=True
     ).aggregate(total=Sum('monto_penalizado'))['total'] or Decimal('0.00')
 
-    # 3. Penalizaciones Totales Históricas Resueltas (Cobradas + Condonadas)
-    total_penalizaciones_historicas = penalizaciones_cobradas + penalizaciones_condonadas
-
-    # 4. Moras Activas aún por cobrar
+    # 6.3. Moras Activas aún por cobrar
     total_moras_pendientes = Penalizacion.objects.filter(
         activa=True
     ).aggregate(total=Sum('monto_penalizado'))['total'] or Decimal('0.00') 
-    
+
+    # 6.4. HISTÓRICO ABSOLUTO (Cobradas + Condonadas + Pendientes)
+    total_penalizaciones_historico = Penalizacion.objects.aggregate(
+        total=Sum('monto_penalizado')
+    )['total'] or Decimal('0.00')
     # 6. Respuesta final
     return Response({
         
@@ -212,10 +214,10 @@ def estadisticas_globales(request):
         "total_penalizaciones": total_moras_historicas,
         "grafica_semanal": grafica_semanal,
         "cobrado_hoy": f"${cobrado_hoy:,.2f}",
-        "total_moras_pendientes": float(total_moras_pendientes),
-        "penalizaciones_cobradas": float(penalizaciones_cobradas),
-        "penalizaciones_condonadas": float(penalizaciones_condonadas),
-        "total_penalizaciones": float(total_penalizaciones_historicas), # La suma de Cobradas + Condonadas
+        "total_penalizaciones": float(total_penalizaciones_historico), # $31,950.00 (Histórico Absoluto)
+        "penalizaciones_cobradas": float(penalizaciones_cobradas),     # $7,945.00
+        "penalizaciones_condonadas": float(penalizaciones_condonadas), # $9,660.00
+        "total_moras_pendientes": float(total_moras_pendientes),       # $14,345.00
     })
 
 # prestamos/views.py
