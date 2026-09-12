@@ -633,10 +633,34 @@ def reportes_detallados(request):
                         break
 
         rangos_resultado = []
+        total_interes_global = 0.0
+        total_programado_global = 0.0
+        total_penalizaciones_global = 0.0
         for r in definicion_rangos:
             label = r["label"]
             d = datos_por_rango[label]
             lista_titulares = sorted(list(d["clientes"]))
+            p_ids = list(d["prestamos_ids"])
+            if p_ids:
+                pen_rango = Penalizacion.objects.filter(
+                    prestamo_id__in=p_ids,
+                    activa=False,
+                    motivo_condonacion__isnull=True,
+                    fecha_condonacion__isnull=True
+                ).aggregate(total=Sum('monto_penalizado'))['total'] or Decimal('0.00')
+            else:
+                pen_rango = Decimal('0.00')
+
+            pen_cobrada_float = float(pen_rango)
+            cap_float = round(d["capital"], 2)
+            int_float = round(d["interes"], 2)
+            tot_float = round(d["total"], 2)
+            tot_con_pen_float = round(tot_float + pen_cobrada_float, 2)
+            
+            # Acumular globales
+            total_interes_global += int_float
+            total_programado_global += tot_float
+            total_penalizaciones_global += pen_cobrada_float
 
             rangos_resultado.append({
                 "rango": label,
@@ -660,7 +684,13 @@ def reportes_detallados(request):
         return Response({
             "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')} (Semanas {sem_inicio} a {sem_fin})",
             "rangos": rangos_resultado,
-            "historial": historial_data
+            "historial": historial_data,
+            # Totales y campos globales agregados para los reportes
+            "total_interes_generado": round(total_interes_global, 2),
+            "total_esperado": round(total_programado_global, 2),
+            "penalizaciones_cobradas": round(total_penalizaciones_global, 2),
+            "ingresos_intereses_mas_penalizaciones": round(total_interes_global + total_penalizaciones_global, 2),
+            "total_programado_mas_penalizaciones": round(total_programado_global + total_penalizaciones_global, 2)
         })
 
     except Exception as e:
