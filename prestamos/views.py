@@ -668,6 +668,19 @@ def obtener_numero_semana(fecha_obj):
 #         print(traceback.format_exc())
 #         return Response({"error": str(e)}, status=500)
 
+from decimal import Decimal
+from datetime import datetime, date, timedelta
+import pytz
+import traceback
+from django.utils import timezone
+from django.db.models import Sum, Q
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+
+# Asumiendo que Penalizacion está importado en este archivo
+# from .models import Prestamo, Penalizacion
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def reportes_detallados(request):
@@ -777,17 +790,47 @@ def reportes_detallados(request):
                             datos_por_rango[label]["clientes"].add(titular)
                         break
 
+        # --- CÁLCULO DE PENALIZACIONES Y CONSTRUCCIÓN DE RANGOS ---
         rangos_resultado = []
+        total_interes_global = 0.0
+        total_programado_global = 0.0
+        total_penalizaciones_global = 0.0
+
         for r in definicion_rangos:
             label = r["label"]
             d = datos_por_rango[label]
             lista_titulares = sorted(list(d["clientes"]))
 
+            # Consultar penalizaciones cobradas para los préstamos asociados a este rango
+            p_ids = list(d["prestamos_ids"])
+            if p_ids:
+                pen_rango = Penalizacion.objects.filter(
+                    prestamo_id__in=p_ids,
+                    activa=False,
+                    motivo_condonacion__isnull=True,
+                    fecha_condonacion__isnull=True
+                ).aggregate(total=Sum('monto_penalizado'))['total'] or Decimal('0.00')
+            else:
+                pen_rango = Decimal('0.00')
+
+            pen_cobrada_float = float(pen_rango)
+            cap_float = round(d["capital"], 2)
+            int_float = round(d["interes"], 2)
+            tot_float = round(d["total"], 2)
+            tot_con_pen_float = round(tot_float + pen_cobrada_float, 2)
+
+            # Acumular globales
+            total_interes_global += int_float
+            total_programado_global += tot_float
+            total_penalizaciones_global += pen_cobrada_float
+
             rangos_resultado.append({
                 "rango": label,
-                "capital": round(d["capital"], 2),
-                "interes": round(d["interes"], 2),
-                "total": round(d["total"], 2),
+                "capital": cap_float,
+                "interes": int_float,
+                "total": tot_float,
+                "penalizacion_cobrada": round(pen_cobrada_float, 2),
+                "total_con_penalizacion": tot_con_pen_float,
                 "cant": len(d["prestamos_ids"]),
                 "clientes": ", ".join(lista_titulares) if lista_titulares else "0 préstamos"
             })
@@ -802,14 +845,21 @@ def reportes_detallados(request):
             for s_num, valores in sorted(semanas_map.items())
         ]
 
+        # --- RESPUESTA CON NUEVAS PROPIEDADES Y TOTALES ---
         return Response({
             "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')} (Semanas {sem_inicio} a {sem_fin})",
             "rangos": rangos_resultado,
-            "historial": historial_data
+            "historial": historial_data,
+            
+            # Totales y campos globales agregados para los reportes
+            "total_interes_generado": round(total_interes_global, 2),
+            "total_esperado": round(total_programado_global, 2),
+            "penalizaciones_cobradas": round(total_penalizaciones_global, 2),
+            "ingresos_intereses_mas_penalizaciones": round(total_interes_global + total_penalizaciones_global, 2),
+            "total_programado_mas_penalizaciones": round(total_programado_global + total_penalizaciones_global, 2)
         })
 
     except Exception as e:
-        import traceback
         print(traceback.format_exc())
         return Response({"error": str(e)}, status=500)
 # ==============================
