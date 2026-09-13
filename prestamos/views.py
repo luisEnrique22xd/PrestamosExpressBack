@@ -681,6 +681,191 @@ from rest_framework.response import Response
 # Asumiendo que Penalizacion está importado en este archivo
 # from .models import Prestamo, Penalizacion
 
+# @api_view(['GET'])
+# @permission_classes([AllowAny])
+# def reportes_detallados(request):
+#     try:
+#         inicio_str = request.query_params.get('inicio')
+#         fin_str = request.query_params.get('fin')
+#         mexico_tz = pytz.timezone('America/Mexico_City')
+        
+#         if inicio_str and fin_str:
+#             try:
+#                 f_inicio = datetime.strptime(inicio_str, '%Y-%m-%d').date()
+#                 f_fin = datetime.strptime(fin_str, '%Y-%m-%d').date()
+#             except ValueError:
+#                 f_inicio = timezone.now().astimezone(mexico_tz).date()
+#                 f_fin = f_inicio
+#         else:
+#             hoy = timezone.now().astimezone(mexico_tz).date()
+#             f_inicio = hoy
+#             f_fin = hoy
+
+#         sem_inicio = obtener_numero_semana(f_inicio)
+#         sem_fin = obtener_numero_semana(f_fin)
+#         semanas_solicitadas = set(range(sem_inicio, sem_fin + 1))
+
+#         definicion_rangos = [
+#             {"label": "500-1500", "min": 500, "max": 1500},
+#             {"label": "1501-3000", "min": 1501, "max": 3000},
+#             {"label": "3001-5000", "min": 3001, "max": 5000},
+#             {"label": "5001-7500", "min": 5001, "max": 7500},
+#             {"label": "7501-10000", "min": 7501, "max": 10000},
+#             {"label": "10001-12500", "min": 10001, "max": 12500},
+#             {"label": "12501-15000", "min": 12501, "max": 15000},
+#         ]
+
+#         prestamos_candidatos = Prestamo.objects.select_related('cliente', 'grupo').all()
+
+#         datos_por_rango = {
+#             r["label"]: {
+#                 "capital": 0.0,
+#                 "interes": 0.0,
+#                 "total": 0.0,
+#                 "clientes": set(),
+#                 "prestamos_ids": set()
+#             }
+#             for r in definicion_rangos
+#         }
+
+#         semanas_map = {
+#             s: {"label": f"SEM {s}", "capital": 0.0, "interes": 0.0, "total": 0.0} 
+#             for s in sorted(semanas_solicitadas)
+#         }
+
+#         for p in prestamos_candidatos:
+#             if not p.monto_capital or float(p.monto_capital) <= 0:
+#                 continue
+
+#             f_raw = p.fecha_inicio or getattr(p, 'fecha_creacion', None)
+#             if not f_raw:
+#                 continue
+
+#             if isinstance(f_raw, datetime):
+#                 f_inicio_p = f_raw.astimezone(mexico_tz).date()
+#             elif isinstance(f_raw, date):
+#                 f_inicio_p = f_raw
+#             else:
+#                 try:
+#                     f_inicio_p = datetime.strptime(str(f_raw).split(' ')[0], '%Y-%m-%d').date()
+#                 except Exception:
+#                     continue
+
+#             modalidad = (p.modalidad or 'S').strip().upper()
+#             total_cuotas = int(p.cuotas) if (p.cuotas and int(p.cuotas) > 0) else 1
+#             monto_cap_total = float(p.monto_capital or 0)
+#             monto_pagar_total = float(p.monto_total_pagar or 0)
+#             int_total_credito = max(0.0, monto_pagar_total - monto_cap_total)
+
+#             cap_cuota = monto_cap_total / total_cuotas
+#             int_cuota = int_total_credito / total_cuotas
+#             monto_cuota = cap_cuota + int_cuota
+
+#             cuotas_en_periodo = 0
+#             dias_salto = 7 if modalidad == 'S' or 'SEMANAL' in modalidad else (14 if modalidad == 'Q' else 28)
+
+#             for i in range(1, total_cuotas + 1):
+#                 fecha_vencimiento = f_inicio_p + timedelta(days=dias_salto * i)
+                
+#                 # 1. Validar estricta y únicamente si la fecha de vencimiento cae en el rango de días pedido
+#                 if f_inicio <= fecha_vencimiento <= f_fin:
+#                     cuotas_en_periodo += 1  # Incrementar SOLO UNA VEZ
+                    
+#                     sem_cuota = obtener_numero_semana(fecha_vencimiento)
+
+#                     # Acumular en semanas_map si la semana de esta cuota está inicializada
+#                     if sem_cuota in semanas_map:
+#                         semanas_map[sem_cuota]["capital"] += cap_cuota
+#                         semanas_map[sem_cuota]["interes"] += int_cuota
+#                         semanas_map[sem_cuota]["total"] += monto_cuota
+
+#                 if cuotas_en_periodo > 0:
+#                     for r in definicion_rangos:
+#                         if Decimal(str(r["min"])) <= p.monto_capital <= Decimal(str(r["max"])):
+#                             label = r["label"]
+#                             datos_por_rango[label]["capital"] += (cap_cuota * cuotas_en_periodo)
+#                             datos_por_rango[label]["interes"] += (int_cuota * cuotas_en_periodo)
+#                             datos_por_rango[label]["total"] += (monto_cuota * cuotas_en_periodo)
+#                             datos_por_rango[label]["prestamos_ids"].add(p.id)
+
+#                             titular = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else None)
+#                             if titular:
+#                                 datos_por_rango[label]["clientes"].add(titular)
+#                             break
+
+#         # --- CÁLCULO DE PENALIZACIONES Y CONSTRUCCIÓN DE RANGOS ---
+#         rangos_resultado = []
+#         total_interes_global = 0.0
+#         total_programado_global = 0.0
+#         total_penalizaciones_global = 0.0
+
+#         for r in definicion_rangos:
+#             label = r["label"]
+#             d = datos_por_rango[label]
+#             lista_titulares = sorted(list(d["clientes"]))
+
+#             # Consultar penalizaciones cobradas para los préstamos asociados a este rango
+#             p_ids = list(d["prestamos_ids"])
+#             if p_ids:
+#                 pen_rango = Penalizacion.objects.filter(
+#                     prestamo_id__in=p_ids,
+#                     activa=False,
+#                     motivo_condonacion__isnull=True,
+#                     fecha_condonacion__isnull=True
+#                 ).aggregate(total=Sum('monto_penalizado'))['total'] or Decimal('0.00')
+#             else:
+#                 pen_rango = Decimal('0.00')
+
+#             pen_cobrada_float = float(pen_rango)
+#             cap_float = round(d["capital"], 2)
+#             int_float = round(d["interes"], 2)
+#             tot_float = round(d["total"], 2)
+#             tot_con_pen_float = round(tot_float + pen_cobrada_float, 2)
+
+#             # Acumular globales
+#             total_interes_global += int_float
+#             total_programado_global += tot_float
+#             total_penalizaciones_global += pen_cobrada_float
+
+#             rangos_resultado.append({
+#                 "rango": label,
+#                 "capital": cap_float,
+#                 "interes": int_float,
+#                 "total": tot_float,
+#                 "penalizacion_cobrada": round(pen_cobrada_float, 2),
+#                 "total_con_penalizacion": tot_con_pen_float,
+#                 "cant": len(d["prestamos_ids"]),
+#                 "clientes": ", ".join(lista_titulares) if lista_titulares else "0 préstamos"
+#             })
+
+#         historial_data = [
+#             {
+#                 "fecha": valores["label"],
+#                 "capital": round(valores["capital"], 2),
+#                 "interes": round(valores["interes"], 2),
+#                 "total": round(valores["total"], 2)
+#             }
+#             for s_num, valores in sorted(semanas_map.items())
+#         ]
+
+#         # --- RESPUESTA CON NUEVAS PROPIEDADES Y TOTALES ---
+#         return Response({
+#             "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')} (Semanas {sem_inicio} a {sem_fin})",
+#             "rangos": rangos_resultado,
+#             "historial": historial_data,
+            
+#             # Totales y campos globales agregados para los reportes
+#             "total_interes_generado": round(total_interes_global, 2),
+#             "total_esperado": round(total_programado_global, 2),
+#             "penalizaciones_cobradas": round(total_penalizaciones_global, 2),
+#             "ingresos_intereses_mas_penalizaciones": round(total_interes_global + total_penalizaciones_global, 2),
+#             "total_programado_mas_penalizaciones": round(total_programado_global + total_penalizaciones_global, 2)
+#         })
+
+#     except Exception as e:
+#         print(traceback.format_exc())
+#         return Response({"error": str(e)}, status=500)
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def reportes_detallados(request):
@@ -703,7 +888,12 @@ def reportes_detallados(request):
 
         sem_inicio = obtener_numero_semana(f_inicio)
         sem_fin = obtener_numero_semana(f_fin)
-        semanas_solicitadas = set(range(sem_inicio, sem_fin + 1))
+
+        # Manejar caso si la consulta cruza de año (ej. Sem 52 a Sem 2)
+        if sem_fin >= sem_inicio:
+            semanas_solicitadas = set(range(sem_inicio, sem_fin + 1))
+        else:
+            semanas_solicitadas = set(range(sem_inicio, 54)).union(set(range(1, sem_fin + 1)))
 
         definicion_rangos = [
             {"label": "500-1500", "min": 500, "max": 1500},
@@ -766,10 +956,12 @@ def reportes_detallados(request):
 
             for i in range(1, total_cuotas + 1):
                 fecha_vencimiento = f_inicio_p + timedelta(days=dias_salto * i)
-                sem_cuota = obtener_numero_semana(fecha_vencimiento)
-
-                if sem_cuota in semanas_solicitadas:
+                
+                # Validar estricta y únicamente si la fecha de vencimiento cae en el rango de días pedido
+                if f_inicio <= fecha_vencimiento <= f_fin:
                     cuotas_en_periodo += 1
+                    
+                    sem_cuota = obtener_numero_semana(fecha_vencimiento)
 
                     if sem_cuota in semanas_map:
                         semanas_map[sem_cuota]["capital"] += cap_cuota
@@ -801,15 +993,21 @@ def reportes_detallados(request):
             d = datos_por_rango[label]
             lista_titulares = sorted(list(d["clientes"]))
 
-            # Consultar penalizaciones cobradas para los préstamos asociados a este rango
             p_ids = list(d["prestamos_ids"])
             if p_ids:
-                pen_rango = Penalizacion.objects.filter(
-                    prestamo_id__in=p_ids,
-                    activa=False,
-                    motivo_condonacion__isnull=True,
-                    fecha_condonacion__isnull=True
-                ).aggregate(total=Sum('monto_penalizado'))['total'] or Decimal('0.00')
+                # Ajusta 'fecha_creacion' por el nombre del campo real en tu modelo Penalizacion (ej. fecha_pago, fecha)
+                filtros_pen = {
+                    'prestamo_id__in': p_ids,
+                    'activa': False,
+                    'motivo_condonacion__isnull': True,
+                    'fecha_condonacion__isnull': True,
+                }
+                # Si tienes campo de fecha en Penalizacion, descomenta la siguiente línea:
+                # filtros_pen['fecha_creacion__date__range'] = (f_inicio, f_fin)
+
+                pen_rango = Penalizacion.objects.filter(**filtros_pen).aggregate(
+                    total=Sum('monto_penalizado')
+                )['total'] or Decimal('0.00')
             else:
                 pen_rango = Decimal('0.00')
 
@@ -819,7 +1017,6 @@ def reportes_detallados(request):
             tot_float = round(d["total"], 2)
             tot_con_pen_float = round(tot_float + pen_cobrada_float, 2)
 
-            # Acumular globales
             total_interes_global += int_float
             total_programado_global += tot_float
             total_penalizaciones_global += pen_cobrada_float
@@ -845,13 +1042,10 @@ def reportes_detallados(request):
             for s_num, valores in sorted(semanas_map.items())
         ]
 
-        # --- RESPUESTA CON NUEVAS PROPIEDADES Y TOTALES ---
         return Response({
             "info": f"{f_inicio.strftime('%d/%m/%Y')} a {f_fin.strftime('%d/%m/%Y')} (Semanas {sem_inicio} a {sem_fin})",
             "rangos": rangos_resultado,
             "historial": historial_data,
-            
-            # Totales y campos globales agregados para los reportes
             "total_interes_generado": round(total_interes_global, 2),
             "total_esperado": round(total_programado_global, 2),
             "penalizaciones_cobradas": round(total_penalizaciones_global, 2),
