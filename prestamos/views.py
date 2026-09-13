@@ -1270,42 +1270,49 @@ from datetime import timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.utils import timezone
+from django.db.models import Prefetch
 import pytz
 
 class CalendarioPagosView(APIView):
     def get(self, request):
         try:
-            # 1. Configuración de Zona Horaria México
             mexico_tz = pytz.timezone('America/Mexico_City')
             hoy = timezone.now().astimezone(mexico_tz).date()
 
-            # 2. Obtener parámetros de la URL
             mes = int(request.query_params.get("mes", hoy.month))
             anio = int(request.query_params.get("anio", hoy.year))
 
-            # Definir la fecha límite máxima a proyectar (fin del mes que está consultando)
             _, ultimo_dia_mes = calendar.monthrange(anio, mes)
             fecha_limite_mes = timezone.datetime(anio, mes, ultimo_dia_mes).date()
 
             proyecciones = []
-            # Traemos préstamos activos con sus relaciones
-            prestamos = Prestamo.objects.filter(activo=True).select_related("cliente", "grupo")
+            
+            # Optimización de consultas ORM para evitar N+1
+            prestamos = Prestamo.objects.filter(activo=True).select_related(
+                "cliente", "grupo"
+            ).prefetch_related("abonos", "penalizaciones")
 
             for p in prestamos:
-                # Convertimos la fecha de inicio a la zona horaria de México
                 fecha_base = p.fecha_inicio
                 if hasattr(fecha_base, 'astimezone'):
                     fecha_base = fecha_base.astimezone(mexico_tz).date()
 
-                # Obtenemos los números de semana/cuota que ya han sido pagados
+                # Cargar en memoria cuotas pagadas y penalizaciones
                 cuotas_pagadas_ids = set(p.abonos.values_list('semana_numero', flat=True))
                 total_abonos_realizados = len(cuotas_pagadas_ids)
+                tiene_mora = any(pen.activa for pen in p.penalizaciones.all())
+
+                nombre_sujeto = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else "N/A")
+                id_sujeto = p.cliente.id if p.cliente else (p.grupo.id if p.grupo else 0)
+                telefono_contacto = getattr(p, 'telefono_aval', "") if p.grupo else (p.cliente.telefono if p.cliente else "")
+
+                monto_cuota = round(p.monto_total_pagar / p.cuotas, 2) if p.cuotas > 0 else 0
 
                 i = 1
-                # Continuamos proyectando si no se han cubierto todas las cuotas
-                # Y no nos hemos pasado del mes que el usuario está consultando
-                while True:
-                    # Calcular días según modalidad
+                # Límite de seguridad para prevenir loops infinitos
+                max_iteraciones = max(p.cuotas + 52, 104) 
+
+                while i <= max_iteraciones:
                     if p.modalidad == "S":
                         fecha_pago = fecha_base + timedelta(days=7 * i)
                     elif p.modalidad == "Q":
@@ -1313,45 +1320,31 @@ class CalendarioPagosView(APIView):
                     else:
                         fecha_pago = fecha_base + timedelta(days=30 * i)
 
-                    # Si cae en Domingo, se pasa al Lunes (Regla Alexander)
+                    # Regla Alexander (Domingo a Lunes)
                     if fecha_pago.weekday() == 6:
                         fecha_pago += timedelta(days=1)
 
-                    # Si la fecha calculada sobrepasa el mes que está viendo el usuario, detenemos el bucle para este préstamo
+                    # Detener si la fecha proyectada excede el mes en consulta
                     if fecha_pago > fecha_limite_mes:
                         break
 
-                    # Determinación de si esta cuota (normal o extemporánea) está pagada
                     if i <= p.cuotas:
                         ya_pagado = i in cuotas_pagadas_ids
                     else:
-                        # Si es una cuota extemporánea (ej. semana 11+), está pagada si los abonos totales cubren esa cuota adicional
                         ya_pagado = total_abonos_realizados >= i
 
-                    # Si la fecha de cobro proyectada cae dentro del mes y año consultado
                     if fecha_pago.month == mes and fecha_pago.year == anio:
-                        tiene_mora = p.penalizaciones.filter(activa=True).exists()
-                        
-                        nombre_sujeto = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else "N/A")
-                        id_sujeto = p.cliente.id if p.cliente else (p.grupo.id if p.grupo else 0)
-                        
-                        if p.grupo:
-                            telefono_contacto = getattr(p, 'telefono_aval', "")
-                        else:
-                            telefono_contacto = p.cliente.telefono if p.cliente else ""
-
                         proyecciones.append({
                             "id": f"{p.id}-{i}",
                             "cliente": nombre_sujeto,
                             "idCliente": id_sujeto,
                             "fecha": fecha_pago.strftime("%Y-%m-%d"),
-                            "monto": round(p.monto_total_pagar / p.cuotas, 2),
+                            "monto": monto_cuota,
                             "estatus": "pagado" if ya_pagado else ("vencido" if fecha_pago < hoy else "pendiente"),
                             "con_penalizacion": tiene_mora,
                             "tel": telefono_contacto
                         })
 
-                    # Criterio de parada: detener el bucle si superó la cuota pactada Y ya se saldaron las cuotas restantes
                     if i >= p.cuotas and total_abonos_realizados >= i:
                         break
 
