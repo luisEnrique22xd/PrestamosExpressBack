@@ -1200,17 +1200,92 @@ class EstadisticasDinamicasView(APIView):
 
         return Response([{"name": d['fecha_truncada'].strftime(formato), "capital": float(d['total_capital'] or 0), "interes": float(d['total_interes'] or 0)} for d in datos])
 
+# class CalendarioPagosView(APIView):
+#     def get(self, request):
+#         try:
+#             # 1. Configuración de Zona Horaria México
+#             mexico_tz = pytz.timezone('America/Mexico_City')
+#             hoy = timezone.now().astimezone(mexico_tz).date()
+            
+            
+#             # 2. Obtener parámetros de la URL
+#             mes = int(request.query_params.get("mes", hoy.month))
+#             anio = int(request.query_params.get("anio", hoy.year))
+
+#             proyecciones = []
+#             # Traemos préstamos activos con sus relaciones
+#             prestamos = Prestamo.objects.filter(activo=True).select_related("cliente", "grupo")
+
+#             for p in prestamos:
+#                 # Convertimos la fecha de inicio a la zona horaria de México
+#                 fecha_base = p.fecha_inicio
+#                 if hasattr(fecha_base, 'astimezone'):
+#                     fecha_base = fecha_base.astimezone(mexico_tz).date()
+
+#                 for i in range(1, p.cuotas + 1):
+#                     # Calcular días según modalidad
+#                     if p.modalidad == "S":
+#                         fecha_pago = fecha_base + timedelta(days=7 * i)
+#                     elif p.modalidad == "Q":
+#                         fecha_pago = fecha_base + timedelta(days=15 * i)
+#                     else:
+#                         fecha_pago = fecha_base + timedelta(days=30 * i)
+
+#                     # Si cae en Domingo, se pasa al Lunes (Regla Alexander)
+#                     if fecha_pago.weekday() == 6:
+#                         fecha_pago += timedelta(days=1)
+
+#                     # Solo agregamos si coincide con el mes y año que Alexander está viendo
+#                     if fecha_pago.month == mes and fecha_pago.year == anio:
+#                         # Verificar si ya existe un abono para esta cuota específica
+#                         ya_pagado = p.abonos.filter(semana_numero=i).exists()
+#                         tiene_mora = p.penalizaciones.filter(activa=True).exists()
+                        
+#                         nombre_sujeto = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else "N/A")
+#                         id_sujeto = p.cliente.id if p.cliente else (p.grupo.id if p.grupo else 0)
+#                         if p.grupo:
+#                             telefono_contacto = getattr(p, 'telefono_aval', "") # Buscamos en el préstamo
+#                         else:
+#                             telefono_contacto = p.cliente.telefono if p.cliente else ""
+
+#                         proyecciones.append({
+#                             "id": f"{p.id}-{i}",
+#                             "cliente": nombre_sujeto,
+#                             "idCliente": id_sujeto,
+#                             "fecha": fecha_pago.strftime("%Y-%m-%d"),
+#                             "monto": round(p.monto_total_pagar / p.cuotas, 2),
+#                             "estatus": "pagado" if ya_pagado else ("vencido" if fecha_pago < hoy else "pendiente"),
+#                             "con_penalizacion": tiene_mora,
+#                             "tel": telefono_contacto
+#                         })
+            
+#             return Response(proyecciones)
+
+#         except Exception as e:
+#             # Esto nos dirá en los logs de Railway exactamente qué rompió
+#             print(f"ERROR EN CALENDARIO: {str(e)}")
+#             return Response({"error": "Error interno al generar calendario"}, status=500)
+import calendar
+from datetime import timedelta
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from django.utils import timezone
+import pytz
+
 class CalendarioPagosView(APIView):
     def get(self, request):
         try:
             # 1. Configuración de Zona Horaria México
             mexico_tz = pytz.timezone('America/Mexico_City')
             hoy = timezone.now().astimezone(mexico_tz).date()
-            
-            
+
             # 2. Obtener parámetros de la URL
             mes = int(request.query_params.get("mes", hoy.month))
             anio = int(request.query_params.get("anio", hoy.year))
+
+            # Definir la fecha límite máxima a proyectar (fin del mes que está consultando)
+            _, ultimo_dia_mes = calendar.monthrange(anio, mes)
+            fecha_limite_mes = timezone.datetime(anio, mes, ultimo_dia_mes).date()
 
             proyecciones = []
             # Traemos préstamos activos con sus relaciones
@@ -1222,7 +1297,14 @@ class CalendarioPagosView(APIView):
                 if hasattr(fecha_base, 'astimezone'):
                     fecha_base = fecha_base.astimezone(mexico_tz).date()
 
-                for i in range(1, p.cuotas + 1):
+                # Obtenemos los números de semana/cuota que ya han sido pagados
+                cuotas_pagadas_ids = set(p.abonos.values_list('semana_numero', flat=True))
+                total_abonos_realizados = len(cuotas_pagadas_ids)
+
+                i = 1
+                # Continuamos proyectando si no se han cubierto todas las cuotas
+                # Y no nos hemos pasado del mes que el usuario está consultando
+                while True:
                     # Calcular días según modalidad
                     if p.modalidad == "S":
                         fecha_pago = fecha_base + timedelta(days=7 * i)
@@ -1235,16 +1317,26 @@ class CalendarioPagosView(APIView):
                     if fecha_pago.weekday() == 6:
                         fecha_pago += timedelta(days=1)
 
-                    # Solo agregamos si coincide con el mes y año que Alexander está viendo
+                    # Si la fecha calculada sobrepasa el mes que está viendo el usuario, detenemos el bucle para este préstamo
+                    if fecha_pago > fecha_limite_mes:
+                        break
+
+                    # Determinación de si esta cuota (normal o extemporánea) está pagada
+                    if i <= p.cuotas:
+                        ya_pagado = i in cuotas_pagadas_ids
+                    else:
+                        # Si es una cuota extemporánea (ej. semana 11+), está pagada si los abonos totales cubren esa cuota adicional
+                        ya_pagado = total_abonos_realizados >= i
+
+                    # Si la fecha de cobro proyectada cae dentro del mes y año consultado
                     if fecha_pago.month == mes and fecha_pago.year == anio:
-                        # Verificar si ya existe un abono para esta cuota específica
-                        ya_pagado = p.abonos.filter(semana_numero=i).exists()
                         tiene_mora = p.penalizaciones.filter(activa=True).exists()
                         
                         nombre_sujeto = p.cliente.nombre if p.cliente else (p.grupo.nombre_grupo if p.grupo else "N/A")
                         id_sujeto = p.cliente.id if p.cliente else (p.grupo.id if p.grupo else 0)
+                        
                         if p.grupo:
-                            telefono_contacto = getattr(p, 'telefono_aval', "") # Buscamos en el préstamo
+                            telefono_contacto = getattr(p, 'telefono_aval', "")
                         else:
                             telefono_contacto = p.cliente.telefono if p.cliente else ""
 
@@ -1258,13 +1350,19 @@ class CalendarioPagosView(APIView):
                             "con_penalizacion": tiene_mora,
                             "tel": telefono_contacto
                         })
-            
+
+                    # Criterio de parada: detener el bucle si superó la cuota pactada Y ya se saldaron las cuotas restantes
+                    if i >= p.cuotas and total_abonos_realizados >= i:
+                        break
+
+                    i += 1
+
             return Response(proyecciones)
 
         except Exception as e:
-            # Esto nos dirá en los logs de Railway exactamente qué rompió
             print(f"ERROR EN CALENDARIO: {str(e)}")
             return Response({"error": "Error interno al generar calendario"}, status=500)
+        
 from django.db import transaction
 
 @api_view(['POST'])
