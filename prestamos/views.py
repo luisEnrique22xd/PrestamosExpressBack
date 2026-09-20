@@ -1522,7 +1522,6 @@ import pytz
 
 @api_view(['GET'])
 def cartera_vencida_hibrida(request):
-    # 1. Anclamos la vista a la hora de México
     mexico_tz = pytz.timezone('America/Mexico_City')
     hoy = timezone.now().astimezone(mexico_tz).date()
     data_cartera = []
@@ -1536,7 +1535,6 @@ def cartera_vencida_hibrida(request):
             atraso_detectado = False
             fecha_vencimiento_antigua = None
             
-            # Normalizamos la fecha de inicio a México (crucial por el server en Indonesia)
             fecha_base = p.fecha_inicio.astimezone(mexico_tz).date()
 
             for i in range(1, p.cuotas + 1):
@@ -1547,9 +1545,9 @@ def cartera_vencida_hibrida(request):
                 else:
                     fv = fecha_base + timedelta(days=30 * i)
 
-                if fv.weekday() == 6: fv += timedelta(days=1)
+                if fv.weekday() == 6: 
+                    fv += timedelta(days=1)
 
-                # Usamos <= para que Alexander vea el aviso desde el primer minuto del vencimiento
                 if fv < hoy:
                     pagado = p.abonos.filter(semana_numero=i).exists()
                     if not pagado:
@@ -1557,29 +1555,24 @@ def cartera_vencida_hibrida(request):
                         fecha_vencimiento_antigua = fv
                         break 
             
+            # Filtrar explícitamente solo multas activas
             multas_activas = p.penalizaciones.filter(activa=True)
             total_multas = float(multas_activas.aggregate(Sum('monto_penalizado'))['monto_penalizado__sum'] or 0)
 
+            # Si ya se condonó la mora y no hay cuotas vencidas pendientes, se omite
             if atraso_detectado or total_multas > 0:
                 es_grupo = (p.tipo == 'G')
                 nombre = p.grupo.nombre_grupo if (es_grupo and p.grupo) else (p.cliente.nombre if p.cliente else "N/A")
                 
-                # 🔥 CÁLCULO CORREGIDO PARA ALEXANDER:
-                # 1. Obtenemos la cuota pactada (Luis: 3600 / 8 = 450)
                 cuota_fija = float(p.monto_total_pagar) / float(p.cuotas if p.cuotas > 0 else 1)
-                
-                # 2. El monto vencido es: (Cuota * 1) + multas acumuladas
-                # Luis: (450 * 1) + 45 = 495.00
                 monto_vencido = round((cuota_fija if atraso_detectado else 0) + total_multas, 2)
-                
-                # Días de atraso
                 dias = (hoy - fecha_vencimiento_antigua).days if fecha_vencimiento_antigua else 0
 
                 data_cartera.append({
                     "id_prestamo": p.id,
                     "nombre_deudor": nombre,
                     "es_grupo": es_grupo,
-                    "monto_vencido": monto_vencido, # <--- Ahora enviará 495.00
+                    "monto_vencido": monto_vencido,
                     "dias_atraso": dias,
                     "fecha_vencimiento": fecha_vencimiento_antigua.strftime("%Y-%m-%d") if fecha_vencimiento_antigua else "Solo Multas",
                     "telefono": p.telefono_aval if es_grupo else (p.cliente.telefono if p.cliente else ""),
@@ -1591,7 +1584,6 @@ def cartera_vencida_hibrida(request):
 
     data_cartera.sort(key=lambda x: x['dias_atraso'], reverse=True)
     return Response(data_cartera)
-
 @api_view(['GET'])
 def reporte_flujo_efectivo(request):
     periodo = request.query_params.get('periodo', 'diario') # diario, semanal, mensual, anual
